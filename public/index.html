@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeCast - Stream to Chromecast</title>
+    <link rel="stylesheet" href="style.css">
+    <meta name="description" content="Self-hosted streaming to your Chromecast devices">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#06b6d4">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <svg class="logo" width="40" height="40" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <!-- TV/Monitor Screen -->
+                    <rect x="6" y="6" width="36" height="24" rx="2" stroke="currentColor" stroke-width="2.5"/>
+                    
+                    <!-- Cast waves (proper arcs) -->
+                    <path d="M6 38 A16 16 0 0 1 22 38" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M6 42 A12 12 0 0 1 18 42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M6 46 A8 8 0 0 1 14 46" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+                HomeCast
+            </h1>
+            <p class="subtitle">Stream a video to your Chromecast</p>
+        </header>
+        
+        <div class="card">
+            <div class="card-header">
+                <span class="step-number">1</span>
+                <h3>Select Device</h3>
+            </div>
+            <select id="device-select">
+                <option value="" disabled selected>Scanning for devices...</option>
+                <option value="manual">Enter IP Manually...</option>
+            </select>
+            
+            <div id="manual-ip-container" class="manual-ip-box" style="display: none;">
+                <label for="manual-ip">Device IP Address:</label>
+                <input type="text" id="manual-ip" placeholder="e.g., 192.168.1.50">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="step-number">2</span>
+                <h3>Video Source</h3>
+            </div>
+            <div class="input-group">
+                <input type="text" id="video-url" placeholder="https://example.com/video.mp4 or webpage URL">
+                <button onclick="fetchAndAnalyze()" class="btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Analyze
+                </button>
+            </div>
+            <div id="resolved-url-container" class="resolved-url" style="display:none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <div>
+                    <strong>Video found:</strong>
+                    <span id="resolved-url"></span>
+                </div>
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" id="use-proxy" checked>
+                <span>
+                    Proxy Stream
+                    <span class="tooltip">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4m0-4h.01" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span class="tooltip-text">Recommended: Fixes CORS issues and enables HLS streaming</span>
+                    </span>
+                </span>
+            </label>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="step-number">3</span>
+                <h3>Cast</h3>
+            </div>
+            <button onclick="startCasting()" id="cast-btn" class="btn-primary" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
+                    <polyline points="17 2 12 7 7 2"/>
+                </svg>
+                Start Casting
+            </button>
+            <button onclick="stopCasting()" id="stop-btn" class="btn-danger" style="display: none;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="6" y="6" width="12" height="12"/>
+                </svg>
+                Stop Casting
+            </button>
+        </div>
+
+        <div class="card status-card" id="status-card" style="display:none">
+            <div class="status-icon">
+                <svg id="status-spinner" class="spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
+                </svg>
+                <svg id="status-success" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="9 12 11 14 15 10"/>
+                </svg>
+                <svg id="status-error" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+            </div>
+            <div class="status-bar" id="status-text">Ready</div>
+        </div>
+
+        <footer>
+            <div class="footer-links">
+                <a href="https://github.com/simno/homecast" target="_blank">GitHub</a>
+                <span>•</span>
+                <span class="version">v0.1.0</span>
+            </div>
+        </footer>
+    </div>
+    
+    <div id="help-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>How to Use HomeCast</h2>
+                <button class="modal-close" onclick="closeHelp()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h3>Quick Start</h3>
+                <ol>
+                    <li>Select your Chromecast device from the dropdown</li>
+                    <li>Paste a video URL or webpage containing a video</li>
+                    <li>Click "Analyze" to extract the video source</li>
+                    <li>Click "Start Casting" to begin playback</li>
+                </ol>
+                
+                <h3>Tips</h3>
+                <ul>
+                    <li><strong>Proxy Stream:</strong> Keep this enabled for most videos. It fixes CORS issues and enables HLS/m3u8 streaming.</li>
+                    <li><strong>Manual IP:</strong> If your device isn't found, select "Enter IP Manually" and enter the Chromecast's IP address.</li>
+                    <li><strong>Supported Formats:</strong> MP4, WebM, HLS (m3u8), and many streaming services.</li>
+                </ul>
+                
+                <h3>Troubleshooting</h3>
+                <ul>
+                    <li><strong>No devices found:</strong> Ensure Chromecast and server are on the same network.</li>
+                    <li><strong>Video doesn't play:</strong> Try enabling "Proxy Stream" option.</li>
+                    <li><strong>Connection issues:</strong> Check firewall and network settings.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

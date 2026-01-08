@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  homecast:
+    # Use pre-built image from GitHub Container Registry
+    # Or uncomment 'build: .' to build locally
+    image: ghcr.io/simno/homecast:latest
+    # build: .
+    container_name: homecast
+    network_mode: host  # Required for mDNS device discovery
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000  # Change this to use a different port
+      # Optional: Set your machine's LAN IP if auto-detection fails
+      # - HOST_IP=192.168.1.100
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/api/devices', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

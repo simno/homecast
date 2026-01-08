@@ -1,0 +1,69 @@
+{
+  "name": "homecast",
+  "version": "0.1.0",
+  "description": "Self-hosted Chromecast streaming for your home network",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/proxy.test.js && node test/cache.test.js && node test/extract.test.js && node test/playlist.test.js && node test/edge-cases.test.js && node test/performance.test.js",
+    "test:proxy": "node test/proxy.test.js",
+    "test:cache": "node test/cache.test.js",
+    "test:extract": "node test/extract.test.js",
+    "test:playlist": "node test/playlist.test.js",
+    "test:edge-cases": "node test/edge-cases.test.js",
+    "test:performance": "node test/performance.test.js",
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix",
+    "typecheck": "tsc --project jsconfig.json",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "dev": "NODE_ENV=development node server.js",
+    "version:patch": "npm version patch",
+    "version:minor": "npm version minor",
+    "version:major": "npm version major",
+    "release": "npm run check && npm run version:patch && git push && git push --tags",
+    "release:minor": "npm run check && npm run version:minor && git push && git push --tags",
+    "release:major": "npm run check && npm run version:major && git push && git push --tags"
+  },
+  "keywords": [
+    "chromecast",
+    "casting",
+    "streaming",
+    "hls",
+    "m3u8",
+    "video",
+    "self-hosted",
+    "homelab"
+  ],
+  "author": "HomeCast Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simno/homecast.git"
+  },
+  "bugs": {
+    "url": "https://github.com/simno/homecast/issues"
+  },
+  "homepage": "https://github.com/simno/homecast#readme",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "axios": "1.13.2",
+    "castv2-client": "1.2.0",
+    "cheerio": "1.1.2",
+    "express": "5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "mdns-js": "1.0.3",
+    "ws": "8.19.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "semver": "^7.7.3"
+  }
+}
