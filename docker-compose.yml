@@ -12,6 +12,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000  # Change this to use a different port
+      # Stale device timeout in hours (default: 3)
+      # Devices not seen for this duration will be removed from the list
+      # Increase if your devices send infrequent mDNS updates (e.g., some LG TVs)
+      - STALE_DEVICE_TIMEOUT_HOURS=3
       # Optional: Set your machine's LAN IP if auto-detection fails
       # - HOST_IP=192.168.1.100
     healthcheck:

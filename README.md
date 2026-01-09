@@ -158,12 +158,13 @@ For these services, use their official apps or browser extensions.
 
 ### Environment Variables
 
-| Variable   | Default       | Description                        |
-|------------|---------------|------------------------------------|
-| `PORT`     | `3000`        | Web interface port                 |
-| `HOST_IP`  | Auto-detect   | Server IP for callbacks            |
-| `NODE_ENV` | `development` | Set to `production` for deployment |
-| `DISABLE_SSRF_PROTECTION` | `false` | **⚠️ DANGER:** Disables SSRF protection (not recommended) |
+| Variable                     | Default       | Description                                                                                  |
+|------------------------------|---------------|----------------------------------------------------------------------------------------------|
+| `PORT`                       | `3000`        | Web interface port                                                                           |
+| `STALE_DEVICE_TIMEOUT_HOURS` | `3`           | Hours before inactive devices are removed (increase if devices send infrequent mDNS updates) |
+| `HOST_IP`                    | Auto-detect   | Server IP for callbacks                                                                      |
+| `NODE_ENV`                   | `development` | Set to `production` for deployment                                                           |
+| `DISABLE_SSRF_PROTECTION`    | `false`       | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
 
 ### Security
 
@@ -171,11 +172,13 @@ Because HomeCast proxies external URLs, it needs to be secured against Server-Si
 It should only be run on trusted private networks.
 
 **SSRF Protection** (enabled by default):
+
 - Blocks access to private IP ranges
 - Blocks localhost and loopback addresses
 - Blocks cloud metadata endpoints
 
 To disable for trusted LAN environments where local network access is needed:
+
 ```bash
 docker run -e DISABLE_SSRF_PROTECTION=true ...
 ```
@@ -256,7 +259,7 @@ HomeCast acts as a bridge between web content and your Chromecast, handling:
 - **Protocols**: Cast v2, mDNS, HLS
 - **Caching**: Adaptive (4s for live, 60s for VOD)
 - **Performance**: Connection pooling, DNS caching, 256KB buffers
-- **Image**: Alpine Linux (~50MB)
+- **Image**: Alpine Linux (~70MB)
 
 ## Development
 

@@ -194,7 +194,19 @@ browser.on('update', (data) => {
         deviceLastSeen.set(ip, Date.now()); // Track last seen time
         broadcast({ type: 'devices', devices: Object.values(devices) });
     } else {
-        console.log('[Discovery] Ignoring non-Chromecast service:', data.type);
+        // Not a googlecast service, but update lastSeen if this is a known device
+        // (e.g., LG TVs send airplay/display updates but not googlecast updates)
+        if (data.addresses && data.addresses[0]) {
+            const ip = data.addresses[0];
+            if (devices[ip]) {
+                deviceLastSeen.set(ip, Date.now());
+                console.log(`[Discovery] Updated lastSeen for known device at ${ip}`);
+            } else {
+                console.log('[Discovery] Ignoring non-Chromecast service:', data.type);
+            }
+        } else {
+            console.log('[Discovery] Ignoring non-Chromecast service:', data.type);
+        }
     }
 });
 
@@ -215,7 +227,7 @@ setInterval(() => {
 // Clean up stale devices every 2 minutes (devices that haven't been seen recently)
 setInterval(() => {
     const now = Date.now();
-    const staleThreshold = 600000; // 10 minutes - Chromecast devices rarely send mDNS updates during playback
+    const staleThreshold = STALE_DEVICE_TIMEOUT_MS;
     let removed = 0;
 
     for (const ip of Object.keys(devices)) {
@@ -791,11 +803,13 @@ app.post('/api/stop', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const STALE_DEVICE_TIMEOUT_MS = parseInt(process.env.STALE_DEVICE_TIMEOUT_HOURS || '3') * 60 * 60 * 1000;
 
 // Only start server if not being required as a module
 if (require.main === module) {
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`HomeCast running on port ${PORT}`);
+        console.log(`[Server] Stale device timeout: ${STALE_DEVICE_TIMEOUT_MS / 1000 / 60 / 60} hours`);
         console.log(`[Server] Access the web interface at http://localhost:${PORT}`);
         console.log(`[Server] Local IP: ${getLocalIp()}`);
         console.log('[Server] Waiting for Chromecast devices...');
