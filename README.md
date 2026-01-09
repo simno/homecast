@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test](https://github.com/simno/homecast/actions/workflows/test.yml/badge.svg)](https://github.com/simno/homecast/actions/workflows/test.yml)
 [![Docker](https://github.com/simno/homecast/actions/workflows/docker.yml/badge.svg)](https://github.com/simno/homecast/actions/workflows/docker.yml)
-[![Docker Image Version](https://ghcr-badge.egpl.dev/simno/homecast/latest_tag?label=latest)](https://github.com/simno/homecast/pkgs/container/homecast)
+[![Docker Version](https://ghcr-badge.egpl.dev/simno/homecast/tags?label=version&n=1&ignore=sha256*,latest)](https://github.com/simno/homecast/pkgs/container/homecast)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org)
 
 Stream videos from the web to your Chromecast devices. Simple, fast, and fully self-hosted.
@@ -291,7 +291,7 @@ This project uses GitHub Actions for continuous integration and deployment:
     - Type checking with TypeScript
     - Unit tests
 
-- **Docker workflow** (`docker.yml`): Runs on `main` branch
+- **Docker workflow** (`docker.yml`): Runs on `main` branch and version tags
     - Builds multi-platform Docker images (amd64, arm64)
     - Publishes to GitHub Container Registry
     - Creates attestations for supply chain security
@@ -301,6 +301,30 @@ This project uses GitHub Actions for continuous integration and deployment:
 
 - `ghcr.io/simno/homecast:latest` - Latest stable release
 - `ghcr.io/simno/homecast:v*.*.*` - Specific version tags
+
+### Release Process
+
+The project includes an automated release script that ensures version consistency:
+
+```bash
+npm run release:patch   # 0.1.0 -> 0.1.1 (bug fixes)
+npm run release:minor   # 0.1.1 -> 0.2.0 (new features)
+npm run release:major   # 0.2.0 -> 1.0.0 (breaking changes)
+```
+
+The script automatically:
+1. Runs all checks (lint, typecheck, tests)
+2. Bumps version in `package.json` and `package-lock.json`
+3. Creates a git commit
+4. Creates a git tag (e.g., `v0.1.1`)
+5. Prompts you to review and push
+
+After review, push the release:
+```bash
+git push origin main --follow-tags
+```
+
+This triggers the Docker workflow to build and publish the new version to GHCR.
 
 ## License
 
