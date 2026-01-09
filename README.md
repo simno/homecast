@@ -317,14 +317,10 @@ The script automatically:
 2. Bumps version in `package.json` and `package-lock.json`
 3. Creates a git commit
 4. Creates a git tag (e.g., `v0.1.1`)
-5. Prompts you to review and push
+5. Asks for confirmation to push
+6. Pushes the commit and tag to trigger the Docker build
 
-After review, push the release:
-```bash
-git push origin main --follow-tags
-```
-
-This triggers the Docker workflow to build and publish the new version to GHCR.
+This automatically triggers the Docker workflow to build and publish the new version to GHCR.
 
 ## License
 

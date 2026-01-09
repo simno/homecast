@@ -61,11 +61,28 @@ echo "  - Updated package.json to $NEW_VERSION"
 echo "  - Created git commit"
 echo "  - Created git tag $NEW_VERSION"
 echo ""
-echo -e "${YELLOW}Next steps:${NC}"
-echo "  Review the changes with: git show"
-echo "  If everything looks good, push with:"
-echo -e "    ${GREEN}git push origin main --follow-tags${NC}"
-echo ""
-echo "  To undo if you made a mistake:"
-echo "    git tag -d $NEW_VERSION"
-echo "    git reset --hard HEAD~1"
+
+# Ask for confirmation before pushing
+read -p "Push release to origin? (Y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    echo -e "${GREEN}Pushing commit to main...${NC}"
+    git push origin main
+    
+    echo -e "${GREEN}Pushing tag $NEW_VERSION...${NC}"
+    git push origin $NEW_VERSION
+    
+    echo ""
+    echo -e "${GREEN}✓ Release complete!${NC}"
+    echo "  View the release: https://github.com/simno/homecast/releases/tag/$NEW_VERSION"
+    echo "  Docker build: https://github.com/simno/homecast/actions/workflows/docker.yml"
+else
+    echo ""
+    echo -e "${YELLOW}Push cancelled. To push manually:${NC}"
+    echo -e "  ${GREEN}git push origin main${NC}"
+    echo -e "  ${GREEN}git push origin $NEW_VERSION${NC}"
+    echo ""
+    echo "  To undo the release:"
+    echo "    git tag -d $NEW_VERSION"
+    echo "    git reset --hard HEAD~1"
+fi
