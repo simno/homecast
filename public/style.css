@@ -303,7 +303,9 @@ select:focus {
 }
 
 .status-card {
-    border: 1px solid var(--primary);
+    background: rgba(0, 102, 204, 0.05);
+    border-radius: 8px;
+    padding: 12px;
 }
 
 .status-icon {
@@ -327,7 +329,7 @@ select:focus {
 
 .status-bar {
     text-align: center;
-    padding: 12px;
+    padding: 0;
     font-weight: 600;
     color: var(--primary);
     font-size: 1.05em;

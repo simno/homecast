@@ -165,8 +165,11 @@
                     <strong>Transfer Rate</strong>
                     <span id="graph-current-rate" style="color: #0066cc; font-size: 13px;">0 KB/s</span>
                 </div>
-                <canvas id="rate-graph" width="600" height="80" style="width: 100%; height: 80px;"></canvas>
-                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; margin-top: 4px;">
+                <div style="display: flex; gap: 4px;">
+                    <div id="graph-y-labels" style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #666; height: 80px; padding: 2px 0; min-width: 55px; text-align: right;"></div>
+                    <canvas id="rate-graph" width="545" height="80" style="width: calc(100% - 59px); height: 80px;"></canvas>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; margin-top: 4px; margin-left: 59px;">
                     <span>60s ago</span>
                     <span>now</span>
                 </div>

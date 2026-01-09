@@ -301,6 +301,23 @@ function updateRateGraph(currentRate) {
 
     // Calculate scale
     const maxRate = Math.max(...rateHistory, 100); // Minimum scale of 100 KB/s
+    const minRate = 0;
+
+    // Update Y-axis labels
+    const yLabelsDiv = document.getElementById('graph-y-labels');
+    if (yLabelsDiv) {
+        const formatRate = (rate) => {
+            if (rate >= 1000) {
+                return `${(rate / 1000).toFixed(1)} MB/s`;
+            }
+            return `${Math.round(rate)} KB/s`;
+        };
+        yLabelsDiv.innerHTML = `
+            <span>${formatRate(maxRate)}</span>
+            <span>${formatRate(maxRate * 0.5)}</span>
+            <span>${formatRate(minRate)}</span>
+        `;
+    }
     const padding = 10;
     const graphHeight = height - padding * 2;
     const graphWidth = width - padding * 2;
