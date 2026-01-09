@@ -108,25 +108,25 @@
                 </svg>
                 Stop Casting
             </button>
-        </div>
-
-        <div class="card status-card" id="status-card" style="display:none">
-            <div class="status-icon">
-                <svg id="status-spinner" class="spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
-                    <circle cx="12" cy="12" r="10" opacity="0.25"/>
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
-                </svg>
-                <svg id="status-success" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="9 12 11 14 15 10"/>
-                </svg>
-                <svg id="status-error" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
-                </svg>
+            
+            <div class="status-card" id="status-card" style="display:none; margin-top: 16px;">
+                <div class="status-icon">
+                    <svg id="status-spinner" class="spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                        <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                        <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
+                    </svg>
+                    <svg id="status-success" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="9 12 11 14 15 10"/>
+                    </svg>
+                    <svg id="status-error" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                </div>
+                <div class="status-bar" id="status-text">Ready</div>
             </div>
-            <div class="status-bar" id="status-text">Ready</div>
         </div>
 
         <!-- Stream Stats Card -->
