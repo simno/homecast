@@ -306,6 +306,149 @@ app.get('/api/discovery/status', (req, res) => {
     });
 });
 
+// --- Helper: Recursive Iframe Search ---
+async function searchIframesRecursively(pageUrl, htmlData, referer, depth) {
+    const MAX_DEPTH = 3; // Limit recursion depth to prevent infinite loops
+    const MAX_IFRAMES_PER_LEVEL = 5; // Limit iframes checked per page
+
+    if (depth >= MAX_DEPTH) {
+        console.log(`[Extract] Max recursion depth ${MAX_DEPTH} reached`);
+        return null;
+    }
+
+    const $ = cheerio.load(htmlData);
+
+    // First, try to find video in current page's HTML
+    const videoUrl = extractVideoFromHtml(htmlData);
+    if (videoUrl) {
+        console.log(`[Extract] Found video at depth ${depth}: ${videoUrl}`);
+        return { videoUrl, referer: pageUrl };
+    }
+
+    // Get all iframes
+    const iframes = $('iframe').map((i, el) => $(el).attr('src')).get().slice(0, MAX_IFRAMES_PER_LEVEL);
+
+    // Also check for dynamically loaded iframes in script tags
+    const scriptIframes = await extractIframesFromScripts(htmlData, pageUrl);
+    const allIframes = [...new Set([...iframes, ...scriptIframes])]; // Remove duplicates
+
+    for (let iframeSrc of allIframes) {
+        if (!iframeSrc) continue;
+
+        try {
+            // Handle relative URLs
+            if (!iframeSrc.startsWith('http')) {
+                iframeSrc = new URL(iframeSrc, new URL(pageUrl).origin).href;
+            }
+
+            console.log(`[Extract] Checking iframe at depth ${depth}: ${iframeSrc}`);
+
+            const { data: iframeData } = await axios.get(iframeSrc, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': pageUrl // Use current page as referer
+                },
+                httpAgent: httpAgent,
+                httpsAgent: httpsAgent,
+                timeout: 5000
+            });
+
+            // Recursively search this iframe, passing iframe URL as new referer
+            const result = await searchIframesRecursively(iframeSrc, iframeData, iframeSrc, depth + 1);
+            if (result) {
+                return result;
+            }
+        } catch (iframeErr) {
+            console.log(`[Extract] Failed to check iframe at depth ${depth} (${iframeSrc}): ${iframeErr.message}`);
+        }
+    }
+
+    return null;
+}
+
+// --- Helper: Extract Video URL from HTML ---
+function extractVideoFromHtml(html) {
+    // 1. Common Player variables (source: "http...", file: "http...") - check first for accuracy
+    let match = html.match(/(?:source|file)\s*:\s*['"](https?:\/\/[^"']+)['"]/);
+    if (match) {
+        return match[1];
+    }
+
+    // 2. Standard m3u8/mp4 URLs
+    match = html.match(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/) ||
+                html.match(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/);
+
+    if (match) {
+        return match[0];
+    }
+
+    // 3. Obfuscated window.atob('...')
+    const atobMatch = html.match(/window\.atob\s*\(\s*['"]([a-zA-Z0-9+/=]+)['"]\s*\)/);
+    if (atobMatch) {
+        try {
+            const decoded = Buffer.from(atobMatch[1], 'base64').toString('utf-8');
+            if (decoded.startsWith('http')) {
+                console.log(`[Extract] Decoded atob URL: ${decoded}`);
+                return decoded;
+            }
+        } catch {
+            console.log('[Extract] Failed to decode atob string');
+        }
+    }
+
+    return null;
+}
+
+// --- Helper: Extract iframes from JavaScript ---
+async function extractIframesFromScripts(html, pageUrl) {
+    const iframes = [];
+
+    // Match document.write with iframe src
+    const docWriteMatches = html.matchAll(/document\.write\([^)]*src\s*=\s*['"](https?:\/\/[^'"]+)['"]/gi);
+    for (const match of docWriteMatches) {
+        iframes.push(match[1]);
+    }
+
+    // Match iframe src in string literals (common in obfuscated JS)
+    const srcMatches = html.matchAll(/<iframe[^>]+src\s*=\s*['"](https?:\/\/[^'"]+)['"]/gi);
+    for (const match of srcMatches) {
+        iframes.push(match[1]);
+    }
+
+    // Extract and fetch external script tags that might contain iframe URLs
+    const scriptSrcMatches = html.matchAll(/<script[^>]+src\s*=\s*['"](https?:\/\/[^'"]+)['"]/gi);
+    const scriptUrls = [];
+    for (const match of scriptSrcMatches) {
+        scriptUrls.push(match[1]);
+    }
+
+    // Fetch external scripts and search for iframes (limit to 3 scripts for performance)
+    for (const scriptUrl of scriptUrls.slice(0, 3)) {
+        try {
+            console.log(`[Extract] Fetching external script: ${scriptUrl}`);
+            const { data: scriptData } = await axios.get(scriptUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': pageUrl
+                },
+                httpAgent: httpAgent,
+                httpsAgent: httpsAgent,
+                timeout: 3000
+            });
+
+            // Search for iframe URLs in the script content
+            const scriptIframeMatches = scriptData.matchAll(/src\s*=\s*['"](https?:\/\/[^'"]+)['"]/gi);
+            for (const match of scriptIframeMatches) {
+                iframes.push(match[1]);
+            }
+        } catch (err) {
+            console.log(`[Extract] Failed to fetch script ${scriptUrl}: ${err.message}`);
+        }
+    }
+
+    return iframes;
+}
+
 // --- API: Extract Video URL ---
 app.post('/api/extract', apiLimiter, async (req, res) => {
     const { url } = req.body;
@@ -351,72 +494,12 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
             }
         }
 
-        // Deep Search: Inspect Iframes if still no video found
+        // Deep Search: Inspect Iframes recursively if still no video found
         if (!videoUrl) {
-            const iframes = $('iframe').map((i, el) => $(el).attr('src')).get();
-            for (let iframeSrc of iframes) {
-                if (!iframeSrc) continue;
-                try {
-                    // Handle relative URLs
-                    if (!iframeSrc.startsWith('http')) {
-                        iframeSrc = new URL(iframeSrc, new URL(url).origin).href;
-                    }
-
-                    console.log(`[Extract] Checking iframe: ${iframeSrc}`);
-                    const { data: iframeData } = await axios.get(iframeSrc, {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Referer': url // Critical for many embeds
-                        },
-                        httpAgent: httpAgent,
-                        httpsAgent: httpsAgent,
-                        timeout: 5000
-                    });
-
-                    // Regex search in iframe HTML
-                    // 1. Standard m3u8/mp4
-                    let match = iframeData.match(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/) ||
-                                iframeData.match(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/);
-
-                    // 2. Common Player variables (source: "http...", file: "http...")
-                    if (!match) {
-                        match = iframeData.match(/(?:source|file)\s*:\s*['"](https?:\/\/[^"']+)['"]/);
-                    }
-
-                    // 3. Obfuscated window.atob('...')
-                    if (!match) {
-                        const atobMatch = iframeData.match(/window\.atob\s*\(\s*['"]([a-zA-Z0-9+/=]+)['"]\s*\)/);
-                        if (atobMatch) {
-                            try {
-                                const decoded = Buffer.from(atobMatch[1], 'base64').toString('utf-8');
-                                console.log(`[Extract] Decoded atob URL: ${decoded}`);
-                                if (decoded.startsWith('http')) {
-                                    videoUrl = decoded;
-                                    videoReferer = iframeSrc; // Update referer to the iframe
-                                    break;
-                                }
-                            } catch {
-                                console.log('[Extract] Failed to decode atob string');
-                            }
-                        }
-                    }
-
-                    // 4. Aggressive loose match for anything with .m3u8
-                    if (!match && !videoUrl) {
-                        match = iframeData.match(/https?:\/\/[^"']+\.m3u8/);
-                    }
-
-                    if (match) {
-                        videoUrl = match[1] || match[0]; // match[1] for capture group, match[0] for full match
-                        videoReferer = iframeSrc; // Update referer to the iframe
-                        console.log(`[Extract] Found in iframe: ${videoUrl}`);
-                        break;
-                    } else {
-                        console.log(`[Extract] No video found in iframe ${iframeSrc}. Preview: ${iframeData.substring(0, 300)}...`);
-                    }
-                } catch (iframeErr) {
-                    console.log(`[Extract] Failed to check iframe ${iframeSrc}: ${iframeErr.message}`);
-                }
+            const result = await searchIframesRecursively(url, data, url, 0);
+            if (result) {
+                videoUrl = result.videoUrl;
+                videoReferer = result.referer;
             }
         }
 
