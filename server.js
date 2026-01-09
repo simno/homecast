@@ -120,6 +120,10 @@ const playlistCache = new Map();
 const CACHE_TTL_VOD = 60000; // 60 seconds for VOD
 const CACHE_TTL_LIVE = 4000; // 4 seconds for live streams (needs frequent updates)
 
+// Stream statistics tracking
+// Key: clientIp -> { totalBytes, startTime, lastActivity, resolution, bitrate }
+const streamStats = new Map();
+
 // --- Discovery ---
 const devices = {};
 const deviceLastSeen = new Map(); // Track when devices were last seen for staleness detection
@@ -286,6 +290,26 @@ app.get('/api/devices', (req, res) => {
     const deviceList = Object.values(devices);
     console.log(`[API] Device list requested - returning ${deviceList.length} device(s)`);
     res.json(deviceList);
+});
+
+// --- API: Stream Stats ---
+app.get('/api/stats', (req, res) => {
+    const allStats = Array.from(streamStats.entries()).map(([clientIp, stats]) => {
+        const duration = (Date.now() - stats.startTime) / 1000; // seconds
+        const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0; // KB/s
+        return {
+            clientIp,
+            totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
+            transferRate,
+            duration: Math.round(duration),
+            resolution: stats.resolution,
+            bitrate: stats.bitrate,
+            segmentCount: stats.segmentCount,
+            cacheHits: stats.cacheHits,
+            lastActivity: new Date(stats.lastActivity).toISOString()
+        };
+    });
+    res.json(allStats);
 });
 
 // --- API: Discovery Status (for debugging) ---
@@ -569,6 +593,24 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
     if (!url) return res.status(400).json({ error: 'URL parameter required' });
 
+    // Initialize or get stream stats for this client
+    if (!streamStats.has(clientIp)) {
+        streamStats.set(clientIp, {
+            totalBytes: 0,
+            startTime: Date.now(),
+            lastActivity: Date.now(),
+            resolution: 'Unknown',
+            bitrate: 0,
+            segmentCount: 0,
+            cacheHits: 0
+        });
+    }
+
+    const stats = streamStats.get(clientIp);
+    stats.lastActivity = Date.now();
+
+    if (!url) return res.status(400).json({ error: 'URL parameter required' });
+
     // Security: Validate URL for SSRF protection
     const validation = await validateProxyUrl(url);
     if (!validation.valid) {
@@ -603,12 +645,19 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
             // Return cached if still valid
             if (cached && (Date.now() - cached.timestamp < cacheTTL)) {
-                console.log(`[Proxy] Serving cached playlist (${cached.isLive ? 'LIVE' : 'VOD'}): ${url}`);
+                const age = Math.round((Date.now() - cached.timestamp) / 1000);
+                console.log(`[Proxy] Serving cached playlist (${cached.isLive ? 'LIVE' : 'VOD'}, age: ${age}s): ${url.substring(0, 80)}...`);
+                stats.cacheHits++;
                 res.set('Content-Type', contentType);
                 return res.send(cached.content);
             }
 
-            console.log(`[Proxy] Fetching and caching playlist: ${url}`);
+            if (cached) {
+                const age = Math.round((Date.now() - cached.timestamp) / 1000);
+                console.log(`[Proxy] Cache expired (age: ${age}s, TTL: ${cacheTTL / 1000}s), refetching: ${url.substring(0, 80)}...`);
+            } else {
+                console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
+            }
 
             // Fetch with timeout
             const response = await axios({
@@ -641,6 +690,31 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
                     // Detect if this is a live stream (no EXT-X-ENDLIST tag)
                     const isLive = !originalM3u8.includes('#EXT-X-ENDLIST');
+
+                    // Extract resolution from playlist if available (master playlists)
+                    const resolutionMatch = originalM3u8.match(/RESOLUTION=(\d+x\d+)/);
+                    if (resolutionMatch) {
+                        stats.resolution = resolutionMatch[1];
+                    } else if (!stats.resolution || stats.resolution === 'Unknown') {
+                        // For media playlists, estimate from context or mark as stream
+                        stats.resolution = 'Live Stream';
+                    }
+
+                    // Extract bandwidth/bitrate if available
+                    const bandwidthMatch = originalM3u8.match(/BANDWIDTH=(\d+)/);
+                    if (bandwidthMatch) {
+                        stats.bitrate = Math.round(parseInt(bandwidthMatch[1]) / 1000); // Convert to Kbps
+                    } else if (!stats.bitrate || stats.bitrate === 0) {
+                        // Try to extract target duration to estimate bitrate
+                        const targetDurationMatch = originalM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                        if (targetDurationMatch && stats.segmentCount > 0) {
+                            // Rough estimate: if we know segment duration, estimate from data rate
+                            const duration = (Date.now() - stats.startTime) / 1000;
+                            if (duration > 10) {
+                                stats.bitrate = Math.round((stats.totalBytes * 8) / duration / 1000); // Kbps
+                            }
+                        }
+                    }
 
                     const rewrittenM3u8 = originalM3u8.split('\n').map(line => {
                         const result = resolveM3u8Url(line, baseUrl);
@@ -697,9 +771,39 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
         res.set(response.headers);
         res.removeHeader('content-length');
 
+        // Track bytes transferred
+        stats.segmentCount++;
+        let segmentBytes = 0;
+        response.data.on('data', (chunk) => {
+            stats.totalBytes += chunk.length;
+            segmentBytes += chunk.length;
+        });
+
         response.data.on('error', (err) => {
             console.error('[Proxy] Stream pipe error:', err);
+            console.error('[Proxy] URL was:', url.substring(0, 100));
             if (!res.headersSent) res.status(500).end();
+        });
+
+        response.data.on('end', () => {
+            console.log(`[Proxy] Segment completed: ${url.substring(url.lastIndexOf('/') + 1, url.lastIndexOf('?') > 0 ? url.lastIndexOf('?') : undefined)} (${segmentBytes} bytes)`);
+
+            // Broadcast stats after segment completes
+            const duration = (Date.now() - stats.startTime) / 1000; // seconds
+            const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0; // KB/s
+            broadcast({
+                type: 'streamStats',
+                stats: {
+                    totalBytes: stats.totalBytes,
+                    totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
+                    transferRate: transferRate,
+                    duration: Math.round(duration),
+                    resolution: stats.resolution,
+                    bitrate: stats.bitrate,
+                    segmentCount: stats.segmentCount,
+                    cacheHits: stats.cacheHits
+                }
+            });
         });
 
         // Performance: Stream with larger chunks for better throughput
