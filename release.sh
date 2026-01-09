@@ -47,8 +47,16 @@ npm run check
 echo -e "${GREEN}Bumping version ($VERSION_TYPE)...${NC}"
 NEW_VERSION=$(npm version $VERSION_TYPE --no-git-tag-version)
 
+# Extract version number without 'v' prefix
+VERSION_NUMBER=${NEW_VERSION#v}
+
+# Update version in index.html (BSD sed compatible)
+echo -e "${GREEN}Updating version in index.html...${NC}"
+sed -i.bak "s/<span class=\"version\">v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*<\/span>/<span class=\"version\">v${VERSION_NUMBER}<\/span>/" public/index.html
+rm -f public/index.html.bak
+
 # Update package.json and create commit
-git add package.json package-lock.json
+git add package.json package-lock.json public/index.html
 git commit -m "Release $NEW_VERSION"
 
 # Create tag (npm version already adds 'v' prefix)
@@ -58,6 +66,7 @@ echo -e "${GREEN}Version bumped to $NEW_VERSION${NC}"
 echo ""
 echo -e "${YELLOW}Changes made:${NC}"
 echo "  - Updated package.json to $NEW_VERSION"
+echo "  - Updated public/index.html version"
 echo "  - Created git commit"
 echo "  - Created git tag $NEW_VERSION"
 echo ""
