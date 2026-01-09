@@ -142,53 +142,56 @@ playlistBoundaryTests.forEach(({ name, playlist, expectedValid, minSize }, index
 const cacheEdgeCases = [
     {
         name: 'Cache with timestamp in future (clock skew)',
-        timestamp: Date.now() + 1000,
+        getTimestamp: () => Date.now() + 1000,
         isLive: false,
         expectedValid: true // Still valid since future - now = negative
     },
     {
         name: 'Cache with timestamp at 0 (epoch)',
-        timestamp: 0,
+        getTimestamp: () => 0,
         isLive: false,
         expectedValid: false // Very old
     },
     {
         name: 'Cache with negative timestamp',
-        timestamp: -1000,
+        getTimestamp: () => -1000,
         isLive: false,
         expectedValid: false // Invalid
     },
     {
         name: 'Cache at exact expiration boundary (live)',
-        timestamp: Date.now() - 4000,
+        getTimestamp: () => Date.now() - 4000,
         isLive: true,
         expectedValid: false // Exactly at TTL = expired
     },
     {
         name: 'Cache 1ms before expiration (live)',
-        timestamp: Date.now() - 3999,
+        getTimestamp: () => Date.now() - 3999,
         isLive: true,
         expectedValid: true
     },
     {
         name: 'Cache 1ms after expiration (live)',
-        timestamp: Date.now() - 4001,
+        getTimestamp: () => Date.now() - 4001,
         isLive: true,
         expectedValid: false
     }
 ];
 
-cacheEdgeCases.forEach(({ name, timestamp, isLive, expectedValid }, index) => {
+cacheEdgeCases.forEach(({ name, getTimestamp, isLive, expectedValid }, index) => {
     try {
         const CACHE_TTL_VOD = 60000;
         const CACHE_TTL_LIVE = 4000;
         const cacheTTL = isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
-        const isValid = (Date.now() - timestamp < cacheTTL);
+        const timestamp = getTimestamp(); // Calculate timestamp at test time
+        const now = Date.now();
+        const age = now - timestamp;
+        const isValid = (age < cacheTTL);
 
         if (isValid !== expectedValid) {
             console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + index + 1} FAILED: ${name}`);
             console.log(`   Expected valid: ${expectedValid}, Got: ${isValid}`);
-            console.log(`   Age: ${Date.now() - timestamp}ms, TTL: ${cacheTTL}ms`);
+            console.log(`   Age: ${age}ms, TTL: ${cacheTTL}ms`);
             failed++;
         } else {
             console.log(`✓ Test ${urlParsingTests.length + playlistBoundaryTests.length + index + 1}: ${name}`);
