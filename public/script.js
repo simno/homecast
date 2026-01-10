@@ -5,7 +5,7 @@ const castBtn = document.getElementById('cast-btn');
 const stopBtn = document.getElementById('stop-btn');
 const statusText = document.getElementById('status-text');
 const statusCard = document.getElementById('status-card');
-const resolvedUrlSpan = document.getElementById('resolved-url');
+const streamOptionsContainer = document.getElementById('stream-options');
 const statusSpinner = document.getElementById('status-spinner');
 const statusSuccess = document.getElementById('status-success');
 const statusError = document.getElementById('status-error');
@@ -13,6 +13,7 @@ const statusError = document.getElementById('status-error');
 let currentReferer = '';
 let currentDeviceIp = null;
 let _isCasting = false;
+let availableStreams = []; // Store all found streams
 
 // Transfer rate history for graph (last 60 data points = 60 seconds)
 const rateHistory = [];
@@ -151,11 +152,10 @@ window.fetchAndAnalyze = async function () {
 
         const data = await res.json();
 
-        if (data.videoUrl) {
-            resolvedUrlSpan.innerText = data.videoUrl;
-            currentReferer = data.referer || '';
-            document.getElementById('resolved-url-container').style.display = 'flex';
-            updateStatus('✅ Video found! Ready to cast', 'success');
+        if (data.videos && data.videos.length > 0) {
+            availableStreams = data.videos;
+            displayStreamOptions(data.videos);
+            updateStatus(`✅ Found ${data.videos.length} stream${data.videos.length > 1 ? 's' : ''}!`, 'success');
             checkReady();
         } else {
             updateStatus('❌ No video found at this URL', 'error');
@@ -166,19 +166,77 @@ window.fetchAndAnalyze = async function () {
     }
 };
 
+function displayStreamOptions(videos) {
+    streamOptionsContainer.innerHTML = '';
+    document.getElementById('streams-found-text').textContent =
+        videos.length > 1 ? `${videos.length} streams found:` : 'Video found:';
+    document.getElementById('resolved-url-container').style.display = 'flex';
+
+    videos.forEach((video, index) => {
+        const option = document.createElement('div');
+        option.className = `stream-option${video.unsupported ? ' stream-option-unsupported' : ''}`;
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'stream-select';
+        radio.value = index;
+        radio.id = `stream-${index}`;
+        radio.disabled = video.unsupported;
+        if (index === 0 && !video.unsupported) radio.checked = true;
+
+        const label = document.createElement('label');
+        label.setAttribute('for', `stream-${index}`);
+        label.className = 'stream-option-content';
+        label.style.cursor = video.unsupported ? 'not-allowed' : 'pointer';
+
+        const urlSpan = document.createElement('div');
+        urlSpan.className = 'stream-option-url';
+        urlSpan.textContent = video.url;
+
+        const typeSpan = document.createElement('span');
+        typeSpan.className = `stream-option-type ${video.type}`;
+        typeSpan.textContent = video.type.toUpperCase();
+
+        if (video.unsupported) {
+            typeSpan.textContent += ' (UNSUPPORTED)';
+        }
+
+        label.appendChild(urlSpan);
+        label.appendChild(typeSpan);
+
+        option.appendChild(radio);
+        option.appendChild(label);
+
+        if (!video.unsupported) {
+            option.onclick = () => {
+                radio.checked = true;
+                checkReady();
+            };
+        }
+
+        streamOptionsContainer.appendChild(option);
+    });
+}
+
 function checkReady() {
     const ip = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
-    const url = resolvedUrlSpan.innerText;
-    castBtn.disabled = !(ip && url);
+    const selectedStream = document.querySelector('input[name="stream-select"]:checked');
+    castBtn.disabled = !(ip && selectedStream);
 }
 
 // Expose to global scope for HTML onclick handlers
 window.startCasting = async function () {
     const ip = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
-    const url = resolvedUrlSpan.innerText;
-    const proxy = document.getElementById('use-proxy').checked;
+    const selectedRadio = document.querySelector('input[name="stream-select"]:checked');
 
-    if (!ip || !url) return;
+    if (!ip || !selectedRadio) return;
+
+    const selectedIndex = parseInt(selectedRadio.value);
+    const selectedStream = availableStreams[selectedIndex];
+    const url = selectedStream.url;
+    currentReferer = selectedStream.referer;
+
+    const proxy = document.getElementById('use-proxy').checked;
 
     castBtn.disabled = true;
     updateStatus('📡 Connecting to Chromecast...', 'loading');

@@ -246,7 +246,70 @@ select:focus {
 .resolved-url strong {
     color: var(--success);
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
+}
+
+.stream-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px;
+    margin: 4px 0;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.stream-option:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.stream-option input[type="radio"] {
+    margin-top: 2px;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.stream-option-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.stream-option-url {
+    word-break: break-all;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    color: var(--text);
+}
+
+.stream-option-type {
+    display: inline-block;
+    padding: 2px 6px;
+    margin-top: 4px;
+    background: var(--primary);
+    color: white;
+    border-radius: 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.stream-option-type.mp4 {
+    background: #3b82f6;
+}
+
+.stream-option-type.mjpeg {
+    background: #ef4444;
+}
+
+.stream-option-unsupported {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.stream-option-unsupported:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .checkbox-label {

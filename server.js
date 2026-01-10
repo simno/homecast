@@ -524,7 +524,7 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
 
     try {
         // If it's already a video file, return it
-        if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) return res.json({ videoUrl: url, referer: url });
+        if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) return res.json({ videos: [{ url, referer: url }] });
 
         const { data } = await axios.get(url, {
             headers: { 'User-Agent': 'Mozilla/5.0' },
@@ -534,61 +534,88 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
         });
         const $ = cheerio.load(data);
 
+        const foundVideos = new Set(); // Use Set to avoid duplicates
+
         // Try common video selectors
-        let videoUrl = $('video source').attr('src') ||
-                       $('video').attr('src') ||
-                       $('meta[property="og:video"]').attr('content') ||
-                       $('meta[property="og:video:url"]').attr('content');
+        $('video source').each((i, el) => {
+            const src = $(el).attr('src');
+            if (src) foundVideos.add(src);
+        });
+
+        const videoSrc = $('video').attr('src');
+        if (videoSrc) foundVideos.add(videoSrc);
+
+        const ogVideo = $('meta[property="og:video"]').attr('content');
+        if (ogVideo) foundVideos.add(ogVideo);
+
+        const ogVideoUrl = $('meta[property="og:video:url"]').attr('content');
+        if (ogVideoUrl) foundVideos.add(ogVideoUrl);
 
         // Fallback: Regex search in raw HTML (for streams inside JS/JSON)
-        if (!videoUrl) {
-            // Look for m3u8 first (common for livestreams)
-            const m3u8Match = data.match(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/);
-            if (m3u8Match) videoUrl = m3u8Match[0];
+        // Look for all m3u8 URLs (common for livestreams)
+        const m3u8Matches = data.matchAll(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/g);
+        for (const match of m3u8Matches) {
+            foundVideos.add(match[0]);
         }
 
-        if (!videoUrl) {
-            // Look for mp4 next
-            const mp4Match = data.match(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/);
-            if (mp4Match) videoUrl = mp4Match[0];
+        // Look for mp4 URLs
+        const mp4Matches = data.matchAll(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/g);
+        for (const match of mp4Matches) {
+            foundVideos.add(match[0]);
         }
 
         // Look for MJPEG streams (common for webcams)
-        if (!videoUrl) {
-            const mjpegMatch = data.match(/https?:\/\/[^"'\s]+(?:mjpg|mjpeg|jpg\/video)[^"'\s]*/);
-            if (mjpegMatch) {
-                videoUrl = mjpegMatch[0];
-                console.log('[Extract] Found MJPEG stream:', videoUrl);
-            }
+        const mjpegMatches = data.matchAll(/https?:\/\/[^"'\s]+(?:mjpg|mjpeg|jpg\/video)[^"'\s]*/g);
+        for (const match of mjpegMatches) {
+            foundVideos.add(match[0]);
         }
 
-        // Deep Search: Inspect Iframes recursively if still no video found
-        if (!videoUrl) {
+        // Deep Search: Inspect Iframes recursively if no videos found yet
+        if (foundVideos.size === 0) {
             const result = await searchIframesRecursively(url, data, url, 0);
             if (result) {
-                videoUrl = result.videoUrl;
+                foundVideos.add(result.videoUrl);
                 videoReferer = result.referer;
             }
         }
 
-        if (!videoUrl) return res.status(404).json({ error: 'No video found' });
+        if (foundVideos.size === 0) return res.status(404).json({ error: 'No video found' });
 
-        // Handle relative URLs
-        if (videoUrl && !videoUrl.startsWith('http')) {
-            const u = new URL(url);
-            videoUrl = new URL(videoUrl, u.origin).href;
-        }
+        // Convert Set to array and resolve relative URLs
+        const videos = [];
+        for (const videoUrl of foundVideos) {
+            let resolvedUrl = videoUrl;
 
-        // Check if it's MJPEG and warn user
-        if (videoUrl.match(/mjpe?g|jpg.*video/i)) {
-            return res.status(400).json({
-                error: 'MJPEG streams are not supported',
-                details: 'Chromecast does not support MJPEG format. This stream requires transcoding to HLS or MP4.',
-                videoUrl: videoUrl
+            // Handle relative URLs
+            if (videoUrl && !videoUrl.startsWith('http')) {
+                try {
+                    const u = new URL(url);
+                    resolvedUrl = new URL(videoUrl, u.origin).href;
+                } catch {
+                    continue; // Skip invalid URLs
+                }
+            }
+
+            // Check if it's MJPEG and mark it
+            const isMjpeg = resolvedUrl.match(/mjpe?g|jpg.*video/i);
+
+            videos.push({
+                url: resolvedUrl,
+                referer: videoReferer,
+                type: isMjpeg ? 'mjpeg' : (resolvedUrl.includes('.m3u8') ? 'hls' : 'mp4'),
+                unsupported: isMjpeg
             });
         }
 
-        res.json({ videoUrl, referer: videoReferer });
+        // Sort: HLS first, then MP4, MJPEG last
+        videos.sort((a, b) => {
+            const priority = { hls: 0, mp4: 1, mjpeg: 2 };
+            return priority[a.type] - priority[b.type];
+        });
+
+        console.log(`[Extract] Found ${videos.length} video stream(s) at ${url}`);
+
+        res.json({ videos });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
