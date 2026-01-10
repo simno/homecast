@@ -19,7 +19,7 @@ if (IS_DEV) {
         MockChromecast = mockModule.MockChromecast;
         MockCastClient = mockModule.MockCastClient;
         MockPlayer = mockModule.MockPlayer;
-    } catch (_err) {
+    } catch {
         console.warn('[Dev] Mock chromecast module not found, mock device disabled');
     }
 }
