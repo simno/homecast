@@ -9,10 +9,20 @@ const https = require('https');
 const dns = require('dns');
 const rateLimit = require('express-rate-limit');
 
-// Mock Chromecast for development
-const { MockChromecast, MockCastClient, MockPlayer } = require('./mock-chromecast');
+// Mock Chromecast for development (conditionally loaded)
 const IS_DEV = process.env.NODE_ENV === 'development';
-let mockDevice = null;
+let MockChromecast, MockCastClient, MockPlayer, mockDevice;
+
+if (IS_DEV) {
+    try {
+        const mockModule = require('./mock-chromecast');
+        MockChromecast = mockModule.MockChromecast;
+        MockCastClient = mockModule.MockCastClient;
+        MockPlayer = mockModule.MockPlayer;
+    } catch (_err) {
+        console.warn('[Dev] Mock chromecast module not found, mock device disabled');
+    }
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -138,7 +148,7 @@ const devices = {};
 const deviceLastSeen = new Map(); // Track when devices were last seen for staleness detection
 
 // Initialize mock device in development mode
-if (IS_DEV) {
+if (IS_DEV && MockChromecast) {
     console.log('[Discovery] Development mode - initializing mock Chromecast device');
     mockDevice = new MockChromecast('Mock Chromecast (Dev)', 8009);
     mockDevice.start();
