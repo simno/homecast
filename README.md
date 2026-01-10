@@ -270,6 +270,9 @@ npm install                 # Install dependencies
 npm run dev                 # Run in development mode
 ```
 
+When running in development mode, a mock Chromecast device is available for selection, allowing for testing without a
+physical device.
+
 ### Testing & Quality Control
 
 ```bash
@@ -313,6 +316,7 @@ npm run release:major   # 0.2.0 -> 1.0.0 (breaking changes)
 ```
 
 The script automatically:
+
 1. Runs all checks (lint, typecheck, tests)
 2. Bumps version in `package.json` and `package-lock.json`
 3. Creates a git commit

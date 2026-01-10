@@ -9,6 +9,11 @@ const https = require('https');
 const dns = require('dns');
 const rateLimit = require('express-rate-limit');
 
+// Mock Chromecast for development
+const { MockChromecast, MockCastClient, MockPlayer } = require('./mock-chromecast');
+const IS_DEV = process.env.NODE_ENV === 'development';
+let mockDevice = null;
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -124,9 +129,33 @@ const CACHE_TTL_LIVE = 4000; // 4 seconds for live streams (needs frequent updat
 // Key: clientIp -> { totalBytes, startTime, lastActivity, resolution, bitrate }
 const streamStats = new Map();
 
+// Playback tracking for delay calculation
+// Key: deviceIp -> { playbackStartTime, playbackStartPosition, lastDelay }
+const playbackTracking = new Map();
+
 // --- Discovery ---
 const devices = {};
 const deviceLastSeen = new Map(); // Track when devices were last seen for staleness detection
+
+// Initialize mock device in development mode
+if (IS_DEV) {
+    console.log('[Discovery] Development mode - initializing mock Chromecast device');
+    mockDevice = new MockChromecast('Mock Chromecast (Dev)', 8009);
+    mockDevice.start();
+
+    // Add mock device to device list
+    const mockIp = '127.0.0.1';
+    devices[mockIp] = {
+        name: 'Mock Chromecast (Dev)',
+        ip: mockIp,
+        host: 'localhost',
+        id: 'mock-chromecast-dev',
+        isMock: true
+    };
+    deviceLastSeen.set(mockIp, Date.now());
+    console.log('[Discovery] Mock device added to device list');
+}
+
 console.log('[Discovery] Initializing mDNS browser for Chromecast devices...');
 const browser = mdns.createBrowser(mdns.tcp('googlecast'));
 
@@ -235,6 +264,11 @@ setInterval(() => {
     let removed = 0;
 
     for (const ip of Object.keys(devices)) {
+        // Skip mock device in dev mode
+        if (IS_DEV && devices[ip]?.isMock) {
+            continue;
+        }
+
         const lastSeen = deviceLastSeen.get(ip);
         if (!lastSeen) {
             // Device in list but no lastSeen timestamp - shouldn't happen, but skip removal
@@ -791,6 +825,16 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
             // Broadcast stats after segment completes
             const duration = (Date.now() - stats.startTime) / 1000; // seconds
             const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0; // KB/s
+
+            // Get the latest delay from playback tracking
+            let currentDelay = 0;
+            for (const [_ip, tracking] of playbackTracking.entries()) {
+                if (tracking.lastDelay !== undefined) {
+                    currentDelay = tracking.lastDelay;
+                    break; // Assume single active session
+                }
+            }
+
             broadcast({
                 type: 'streamStats',
                 stats: {
@@ -801,7 +845,8 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
                     resolution: stats.resolution,
                     bitrate: stats.bitrate,
                     segmentCount: stats.segmentCount,
-                    cacheHits: stats.cacheHits
+                    cacheHits: stats.cacheHits,
+                    delay: currentDelay
                 }
             });
         });
@@ -843,7 +888,43 @@ app.post('/api/cast', (req, res) => {
     const { ip, url, proxy, referer } = req.body;
     console.log(`[Cast] Request received for IP: ${ip}, URL: ${url}, Proxy: ${proxy}, Referer: ${referer}`);
 
-    const client = new Client();
+    // Clear any existing session and stats for this device (starting fresh)
+    if (activeSessions.has(ip)) {
+        console.log(`[Cast] Stopping existing session on ${ip} before starting new stream`);
+        const existingSession = activeSessions.get(ip);
+        try {
+            existingSession.player.stop(() => {
+                existingSession.client.close();
+            });
+        } catch (err) {
+            console.warn('[Cast] Error stopping existing session:', err.message);
+        }
+        activeSessions.delete(ip);
+    }
+
+    // Clear tracking and stats for fresh start
+    playbackTracking.delete(ip);
+    streamStats.clear();
+    console.log('[Cast] Statistics reset for new stream');
+
+    // Check if this is a mock device
+    const isMockDevice = IS_DEV && devices[ip]?.isMock;
+
+    let client, launchReceiver;
+    if (isMockDevice) {
+        console.log('[Cast] Using mock Chromecast device');
+        client = new MockCastClient(mockDevice);
+        launchReceiver = (ReceiverType, callback) => {
+            // Return mock player
+            const player = new MockPlayer(client, mockDevice);
+            callback(null, player);
+        };
+    } else {
+        client = new Client();
+        launchReceiver = (ReceiverType, callback) => {
+            client.launch(ReceiverType, callback);
+        };
+    }
 
     // Resolve local IP for callback
     const localIp = getLocalIp();
@@ -865,7 +946,7 @@ app.post('/api/cast', (req, res) => {
 
     client.connect(ip, () => {
         console.log(`[Cast] Connected to device ${ip}`);
-        client.launch(DefaultMediaReceiver, (err, player) => {
+        launchReceiver(DefaultMediaReceiver, (err, player) => {
             if (err) {
                 console.error('[Cast] Launch failed:', err);
                 if (!res.headersSent) res.status(500).json({ error: 'Launch failed: ' + err.message });
@@ -926,13 +1007,42 @@ app.post('/api/cast', (req, res) => {
                 // Monitor status
                 player.on('status', (status) => {
                     console.log('[Cast] Player Status Update:', status.playerState);
-                    broadcast({ type: 'playerStatus', status });
+
+                    // DEBUG: Log full status object once to see what's available
+                    if (!playbackTracking.has(ip)) {
+                        console.log('[Cast] Full status object:', JSON.stringify(status, null, 2));
+                    }
+
+                    // Calculate delay only if liveSeekableRange is available
+                    let delay = 0;
+                    if (status.currentTime !== undefined && status.liveSeekableRange && status.liveSeekableRange.end !== undefined) {
+                        // Use the live edge from Chromecast
+                        const liveEdge = status.liveSeekableRange.end;
+                        delay = Math.max(0, liveEdge - status.currentTime);
+                        console.log(`[Delay] Live stream - edge: ${liveEdge.toFixed(1)}s, current: ${status.currentTime.toFixed(1)}s, delay: ${delay.toFixed(1)}s`);
+
+                        // Store delay for streamStats broadcast
+                        const tracking = playbackTracking.get(ip) || {};
+                        tracking.lastDelay = delay;
+                        playbackTracking.set(ip, tracking);
+                    }
+
+                    broadcast({
+                        type: 'playerStatus',
+                        status,
+                        delay
+                    });
                 });
 
                 // Clean up session when media ends
                 player.on('close', () => {
                     console.log('[Cast] Player closed for', ip);
                     activeSessions.delete(ip);
+                    playbackTracking.delete(ip);
+
+                    // Clear stream statistics
+                    streamStats.clear();
+
                     broadcast({ type: 'status', status: 'Playback ended' });
                 });
 
@@ -946,6 +1056,8 @@ app.post('/api/cast', (req, res) => {
         console.error('[Cast] Client error:', err);
         if (!res.headersSent) res.status(500).json({ error: 'Client error: ' + err.message });
         activeSessions.delete(ip);
+        playbackTracking.delete(ip);
+        streamStats.clear();
         client.close();
     });
 });
@@ -978,6 +1090,10 @@ app.post('/api/stop', (req, res) => {
             // Close connection
             client.close();
             activeSessions.delete(ip);
+            playbackTracking.delete(ip);
+
+            // Clear stream statistics
+            streamStats.clear();
 
             broadcast({ type: 'status', status: 'Playback stopped' });
             res.json({ status: 'stopped' });

@@ -174,6 +174,22 @@
                     <span>now</span>
                 </div>
             </div>
+            
+            <!-- Stream Delay Graph -->
+            <div id="delay-graph-container" style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 16px; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong>Stream Delay</strong>
+                    <span id="graph-current-delay" style="color: #dc2626; font-size: 13px;">0.0s</span>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                    <div id="delay-y-labels" style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #666; height: 80px; padding: 2px 0; min-width: 55px; text-align: right;"></div>
+                    <canvas id="delay-graph" width="545" height="80" style="width: calc(100% - 59px); height: 80px;"></canvas>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; margin-top: 4px; margin-left: 59px;">
+                    <span>60s ago</span>
+                    <span>now</span>
+                </div>
+            </div>
         </div>
 
         <footer>

@@ -16,6 +16,7 @@ let _isCasting = false;
 
 // Transfer rate history for graph (last 60 data points = 60 seconds)
 const rateHistory = [];
+const delayHistory = [];
 const MAX_HISTORY = 60;
 
 // WebSocket for live updates
@@ -30,9 +31,14 @@ ws.onmessage = (event) => {
     }
     if (data.type === 'streamStats') {
         updateStreamStats(data.stats);
+        // Update delay graph at same rate as transfer rate (when segments complete)
+        if (data.stats.delay !== undefined && data.stats.delay > 0) {
+            updateDelayGraph(data.stats.delay);
+        }
     }
     if (data.type === 'playerStatus') {
         const state = data.status.playerState;
+        const idleReason = data.status.idleReason;
         let message = `Playback: ${state}`;
         let type = 'info';
 
@@ -41,18 +47,37 @@ ws.onmessage = (event) => {
             type = 'success';
             // Show stats card when playing
             document.getElementById('stream-stats-card').style.display = 'block';
+            // Show stop button
+            document.getElementById('stop-btn').style.display = 'inline-flex';
+            document.getElementById('cast-btn').style.display = 'none';
         } else if (state === 'BUFFERING') {
             message = '⏳ Buffering...';
             type = 'loading';
+            // Show stop button while buffering
+            document.getElementById('stop-btn').style.display = 'inline-flex';
+            document.getElementById('cast-btn').style.display = 'none';
         } else if (state === 'PAUSED') {
             message = '⏸ Paused';
             type = 'info';
+            // Show stop button when paused
+            document.getElementById('stop-btn').style.display = 'inline-flex';
+            document.getElementById('cast-btn').style.display = 'none';
         } else if (state === 'IDLE') {
-            message = '⏹ Stopped';
-            type = 'info';
-            // Hide stats card and clear graph when stopped
+            // Check if it's an error or normal stop
+            if (idleReason === 'ERROR') {
+                message = '❌ Playback Error';
+                type = 'error';
+            } else {
+                message = '⏹ Stopped';
+                type = 'info';
+            }
+            // Hide stats card and clear graph when stopped/error
             document.getElementById('stream-stats-card').style.display = 'none';
             rateHistory.length = 0; // Clear history
+            delayHistory.length = 0; // Clear delay history
+            // Show cast button, hide stop button
+            document.getElementById('cast-btn').style.display = 'inline-flex';
+            document.getElementById('stop-btn').style.display = 'none';
         }
 
         updateStatus(message, type);
@@ -364,6 +389,101 @@ function updateRateGraph(currentRate) {
     ctx.lineTo(startX, height - padding);
     ctx.closePath();
     ctx.fillStyle = 'rgba(0, 102, 204, 0.1)';
+    ctx.fill();
+}
+
+function updateDelayGraph(currentDelay) {
+    // Show the delay graph container
+    const container = document.getElementById('delay-graph-container');
+    if (container) {
+        container.style.display = 'block';
+    }
+
+    // Add current delay to history
+    delayHistory.push(currentDelay);
+
+    // Keep only last 60 data points
+    if (delayHistory.length > MAX_HISTORY) {
+        delayHistory.shift();
+    }
+
+    // Update current delay display
+    document.getElementById('graph-current-delay').textContent = `${currentDelay.toFixed(1)}s`;
+
+    // Draw graph
+    const canvas = document.getElementById('delay-graph');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Don't draw if no data
+    if (delayHistory.length < 2) return;
+
+    // Calculate scale
+    const maxDelay = Math.max(...delayHistory, 1); // Minimum scale of 1 second
+    const minDelay = 0;
+
+    // Update Y-axis labels
+    const yLabelsDiv = document.getElementById('delay-y-labels');
+    if (yLabelsDiv) {
+        yLabelsDiv.innerHTML = `
+            <span>${maxDelay.toFixed(1)}s</span>
+            <span>${(maxDelay * 0.5).toFixed(1)}s</span>
+            <span>${minDelay.toFixed(1)}s</span>
+        `;
+    }
+
+    const padding = 10;
+    const graphHeight = height - padding * 2;
+    const graphWidth = width - padding * 2;
+
+    // Calculate spacing based on actual data points
+    const dataPoints = delayHistory.length;
+    const xStep = graphWidth / (MAX_HISTORY - 1);
+
+    // Calculate starting X position (align right, grow left)
+    const startX = width - padding - ((dataPoints - 1) * xStep);
+
+    // Draw grid lines
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = padding + (graphHeight * i / 4);
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(width - padding, y);
+        ctx.stroke();
+    }
+
+    // Draw the line graph (oldest to newest, ending at right edge)
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    delayHistory.forEach((delay, index) => {
+        const x = startX + (index * xStep);
+        const y = height - padding - (delay / maxDelay * graphHeight);
+
+        if (index === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+
+    ctx.stroke();
+
+    // Draw filled area under the line
+    const lastX = startX + ((dataPoints - 1) * xStep);
+    ctx.lineTo(lastX, height - padding);
+    ctx.lineTo(startX, height - padding);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.1)';
     ctx.fill();
 }
 
