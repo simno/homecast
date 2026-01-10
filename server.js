@@ -594,6 +594,36 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
     }
 });
 
+// --- Helper: Try Next Segment ---
+// For live streams, if current segment is missing, check if next segment exists
+async function tryNextSegment(currentUrl) {
+    try {
+        // Extract segment number from URL (common patterns: segment_123.ts, chunk123.m4s, etc.)
+        const match = currentUrl.match(/(\d+)\.(?:ts|m4s|mp4)(\?.*)?$/);
+        if (!match) return null;
+
+        const segmentNumber = parseInt(match[1]);
+        const nextSegmentNumber = segmentNumber + 1;
+        const nextUrl = currentUrl.replace(`${segmentNumber}.`, `${nextSegmentNumber}.`);
+
+        // Quick HEAD request to check if next segment exists
+        const response = await axios({
+            method: 'head',
+            url: nextUrl,
+            timeout: 1000,
+            validateStatus: (status) => status < 500
+        });
+
+        if (response.status === 200) {
+            console.log(`[Proxy] Next segment exists (${nextSegmentNumber}), skipping missing segment ${segmentNumber}`);
+            return nextUrl;
+        }
+    } catch {
+        // Next segment doesn't exist or error checking
+    }
+    return null;
+}
+
 // --- Helper: Resolve M3U8 URLs ---
 function resolveM3u8Url(line, baseUrl) {
     const trimmed = line.trim();
@@ -792,20 +822,90 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
         }
 
         // Standard Binary Stream (Segments, MP4, etc.) - No caching
-        const response = await axios({
-            method: 'get',
-            url: url,
-            responseType: 'stream',
-            headers: headers,
-            httpAgent: httpAgent,
-            httpsAgent: httpsAgent,
-            timeout: 30000,
-            validateStatus: (status) => status < 500
-        });
+        // Retry logic for video segments (404s are common in live streams)
+        const isVideoSegment = url.includes('.ts') || url.includes('.m4s') || url.includes('.mp4');
+        let response;
+        let _lastError;
+        let currentUrl = url;
+        const maxRetries = isVideoSegment ? 10 : 0; // ~4 seconds total with exponential backoff
+        const retryStartTime = Date.now();
+        let segmentSkipped = false;
 
-        if (response.status >= 400) {
-            console.error(`[Proxy] Upstream returned ${response.status} for ${url}`);
-            return res.status(response.status).end();
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                response = await axios({
+                    method: 'get',
+                    url: currentUrl,
+                    responseType: 'stream',
+                    headers: headers,
+                    httpAgent: httpAgent,
+                    httpsAgent: httpsAgent,
+                    timeout: 30000,
+                    validateStatus: (status) => status < 500
+                });
+
+                if (response.status >= 400) {
+                    _lastError = response.status;
+                    const elapsedTime = Date.now() - retryStartTime;
+
+                    // For live streams: check if next segment exists (skip ahead to stay live)
+                    if (isVideoSegment && response.status === 404 && attempt === 0) {
+                        const nextSegmentUrl = await tryNextSegment(currentUrl);
+                        if (nextSegmentUrl) {
+                            console.log('[Proxy] Skipping to next segment for live stream latency');
+                            currentUrl = nextSegmentUrl;
+                            segmentSkipped = true;
+                            continue; // Try next segment immediately
+                        }
+                    }
+
+                    // After 4 seconds of retries, skip the segment by returning empty response
+                    if (elapsedTime >= 4000 && isVideoSegment) {
+                        console.warn(`[Proxy] Skipping segment after ${Math.round(elapsedTime / 1000)}s of 404s: ${currentUrl.substring(currentUrl.lastIndexOf('/') + 1, 80)}...`);
+                        res.status(200);
+                        res.set('Content-Type', 'video/mp2t'); // MPEG-TS format
+                        res.set('Content-Length', '0');
+                        return res.end();
+                    }
+
+                    if (attempt < maxRetries) {
+                        const delay = Math.min(200 * Math.pow(1.5, attempt), 800); // 200ms, 300ms, 450ms, 675ms, 800ms...
+                        console.log(`[Proxy] Upstream returned ${response.status}, retry ${attempt + 1}/${maxRetries} after ${delay}ms (${Math.round(elapsedTime / 1000)}s elapsed): ${currentUrl.substring(currentUrl.lastIndexOf('/') + 1, 80)}...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    } else {
+                        // Non-video segments (playlists) should fail
+                        console.error(`[Proxy] Upstream returned ${response.status} after ${maxRetries} retries for ${currentUrl}`);
+                        return res.status(response.status).end();
+                    }
+                }
+
+                // Success - break out of retry loop
+                if (segmentSkipped) {
+                    console.log('[Proxy] Successfully retrieved next segment after skip');
+                }
+                break;
+            } catch (err) {
+                _lastError = err;
+                const elapsedTime = Date.now() - retryStartTime;
+
+                // After 4 seconds of retries, skip the segment
+                if (elapsedTime >= 4000 && isVideoSegment) {
+                    console.warn(`[Proxy] Skipping segment after ${Math.round(elapsedTime / 1000)}s of errors: ${err.message}`);
+                    res.status(200);
+                    res.set('Content-Type', 'video/mp2t');
+                    res.set('Content-Length', '0');
+                    return res.end();
+                }
+
+                if (attempt < maxRetries) {
+                    const delay = Math.min(200 * Math.pow(1.5, attempt), 800);
+                    console.log(`[Proxy] Request failed, retry ${attempt + 1}/${maxRetries} after ${delay}ms (${Math.round(elapsedTime / 1000)}s elapsed): ${err.message}`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                throw err;
+            }
         }
 
         // Performance: Optimize socket for video streaming
@@ -825,12 +925,13 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
         response.data.on('error', (err) => {
             console.error('[Proxy] Stream pipe error:', err);
-            console.error('[Proxy] URL was:', url.substring(0, 100));
+            console.error('[Proxy] URL was:', currentUrl.substring(0, 100));
             if (!res.headersSent) res.status(500).end();
         });
 
         response.data.on('end', () => {
-            console.log(`[Proxy] Segment completed: ${url.substring(url.lastIndexOf('/') + 1, url.lastIndexOf('?') > 0 ? url.lastIndexOf('?') : undefined)} (${segmentBytes} bytes)`);
+            const segmentName = currentUrl.substring(currentUrl.lastIndexOf('/') + 1, currentUrl.lastIndexOf('?') > 0 ? currentUrl.lastIndexOf('?') : undefined);
+            console.log(`[Proxy] Segment completed: ${segmentName} (${segmentBytes} bytes)${segmentSkipped ? ' [SKIPPED AHEAD]' : ''}`);
 
             // Broadcast stats after segment completes
             const duration = (Date.now() - stats.startTime) / 1000; // seconds
