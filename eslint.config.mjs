@@ -72,7 +72,12 @@ export default [
                 setTimeout: 'readonly',
                 setInterval: 'readonly',
                 clearTimeout: 'readonly',
-                clearInterval: 'readonly'
+                clearInterval: 'readonly',
+                localStorage: 'readonly',
+                Array: 'readonly',
+                JSON: 'readonly',
+                parseInt: 'readonly',
+                encodeURIComponent: 'readonly'
             }
         }
     },

@@ -20,6 +20,84 @@ const rateHistory = [];
 const delayHistory = [];
 const MAX_HISTORY = 60;
 
+// State persistence
+const STATE_KEY = 'homecast_state';
+
+// Load persisted state on startup
+function loadState() {
+    try {
+        const saved = localStorage.getItem(STATE_KEY);
+        if (saved) {
+            const state = JSON.parse(saved);
+            console.log('[State] Loaded persisted state:', state);
+            return state;
+        }
+    } catch (e) {
+        console.error('[State] Failed to load state:', e);
+    }
+    return null;
+}
+
+// Save state to localStorage
+function saveState(deviceIp) {
+    try {
+        const state = {
+            deviceIp: deviceIp,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        console.log('[State] Saved state:', state);
+    } catch (e) {
+        console.error('[State] Failed to save state:', e);
+    }
+}
+
+// Clear persisted state
+function clearState() {
+    try {
+        localStorage.removeItem(STATE_KEY);
+        console.log('[State] Cleared persisted state');
+    } catch (e) {
+        console.error('[State] Failed to clear state:', e);
+    }
+}
+
+// Check session status for a device
+async function checkSessionStatus(deviceIp) {
+    try {
+        const res = await fetch(`/api/session/${encodeURIComponent(deviceIp)}`);
+        const data = await res.json();
+        console.log(`[State] Session check for ${deviceIp}:`, data.active ? 'active' : 'inactive');
+        return data;
+    } catch (e) {
+        console.error('[State] Failed to check session status:', e);
+        return { active: false };
+    }
+}
+
+// Restore UI state for active session
+function restoreSessionUI(deviceIp, sessionData) {
+    currentDeviceIp = deviceIp;
+    _isCasting = true;
+
+    // Update UI to show active session
+    document.getElementById('cast-btn').style.display = 'none';
+    document.getElementById('stop-btn').style.display = 'inline-flex';
+    document.getElementById('stream-stats-card').style.display = 'block';
+    statusCard.style.display = 'block';
+
+    // If we have current stats, display them immediately
+    if (sessionData && sessionData.stats) {
+        updateStreamStats(sessionData.stats);
+    } else {
+        // Reset stats to defaults if no stats available yet
+        resetStreamStats();
+    }
+
+    updateStatus('🎬 Restored active session', 'success');
+    console.log('[State] UI restored for active session on', deviceIp);
+}
+
 // WebSocket for live updates
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}`);
@@ -31,13 +109,28 @@ ws.onmessage = (event) => {
         updateStatus(data.status, 'info');
     }
     if (data.type === 'streamStats') {
-        updateStreamStats(data.stats);
-        // Update delay graph at same rate as transfer rate (when segments complete)
-        if (data.stats.delay !== undefined && data.stats.delay > 0) {
-            updateDelayGraph(data.stats.delay);
+        // Only update stats if they're for the currently selected device
+        const selectedDeviceIp = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
+        if (data.deviceIp === selectedDeviceIp) {
+            updateStreamStats(data.stats);
+            // Update delay graph at same rate as transfer rate (when segments complete)
+            if (data.stats.delay !== undefined && data.stats.delay > 0) {
+                updateDelayGraph(data.stats.delay);
+            }
+        } else {
+            console.log(`[Stats] Ignoring stats for ${data.deviceIp}, currently viewing ${selectedDeviceIp}`);
         }
     }
     if (data.type === 'playerStatus') {
+        // Only update UI if status is for the currently selected device
+        const selectedDeviceIp = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
+
+        // Check if this status update is for a different device
+        if (data.deviceIp && data.deviceIp !== selectedDeviceIp) {
+            console.log(`[Status] Ignoring player status for ${data.deviceIp}, currently viewing ${selectedDeviceIp}`);
+            return;
+        }
+
         const state = data.status.playerState;
         const idleReason = data.status.idleReason;
         let message = `Playback: ${state}`;
@@ -79,6 +172,11 @@ ws.onmessage = (event) => {
             // Show cast button, hide stop button
             document.getElementById('cast-btn').style.display = 'inline-flex';
             document.getElementById('stop-btn').style.display = 'none';
+
+            // Clear state when playback ends
+            _isCasting = false;
+            currentDeviceIp = null;
+            clearState();
         }
 
         updateStatus(message, type);
@@ -89,8 +187,83 @@ ws.onerror = () => {
     console.warn('WebSocket connection failed, falling back to polling');
 };
 
-deviceSelect.addEventListener('change', toggleManualInput);
+// Device select change handler - check for active sessions
+deviceSelect.addEventListener('change', async function () {
+    toggleManualInput();
+
+    const selectedIp = deviceSelect.value;
+    if (selectedIp && selectedIp !== 'manual') {
+        console.log('[State] Device changed to:', selectedIp);
+
+        // Always reset UI first, then conditionally restore if session exists
+        currentDeviceIp = null;
+        _isCasting = false;
+
+        // Reset buttons
+        document.getElementById('cast-btn').style.display = 'inline-flex';
+        document.getElementById('cast-btn').disabled = true; // Disabled until stream selected
+        document.getElementById('stop-btn').style.display = 'none';
+
+        // Hide status and stats
+        statusCard.style.display = 'none';
+        document.getElementById('stream-stats-card').style.display = 'none';
+
+        // Clear stats display
+        resetStreamStats();
+
+        // Clear graphs
+        rateHistory.length = 0;
+        delayHistory.length = 0;
+
+        // Check if this device has an active session
+        const sessionStatus = await checkSessionStatus(selectedIp);
+
+        if (sessionStatus && sessionStatus.active) {
+            restoreSessionUI(selectedIp, sessionStatus);
+            saveState(selectedIp);
+        }
+    }
+});
+
 manualIpInput.addEventListener('input', checkReady);
+
+// Initialize state on page load
+window.addEventListener('load', async () => {
+    console.log('[State] Page loaded, checking for persisted state...');
+
+    const savedState = loadState();
+    if (savedState && savedState.deviceIp) {
+        // Check if state is not too old (< 24 hours)
+        const age = Date.now() - savedState.timestamp;
+        if (age < 24 * 60 * 60 * 1000) {
+            console.log('[State] Found recent saved state, checking session...');
+
+            // Wait for device list to load
+            setTimeout(async () => {
+                const sessionStatus = await checkSessionStatus(savedState.deviceIp);
+                if (sessionStatus.active) {
+                    console.log('[State] Restoring active session');
+
+                    // Set device in dropdown if it exists
+                    const deviceOption = Array.from(deviceSelect.options).find(
+                        opt => opt.value === savedState.deviceIp
+                    );
+                    if (deviceOption) {
+                        deviceSelect.value = savedState.deviceIp;
+                    }
+
+                    restoreSessionUI(savedState.deviceIp, sessionStatus);
+                } else {
+                    console.log('[State] Saved session is no longer active');
+                    clearState();
+                }
+            }, 1000); // Wait 1 second for devices to populate
+        } else {
+            console.log('[State] Saved state is too old, clearing');
+            clearState();
+        }
+    }
+});
 
 function toggleManualInput() {
     const isManual = deviceSelect.value === 'manual';
@@ -193,6 +366,11 @@ function displayStreamOptions(videos) {
         urlSpan.className = 'stream-option-url';
         urlSpan.textContent = video.url;
 
+        const badgesContainer = document.createElement('div');
+        badgesContainer.style.marginTop = '4px';
+        badgesContainer.style.display = 'flex';
+        badgesContainer.style.gap = '6px';
+
         const typeSpan = document.createElement('span');
         typeSpan.className = `stream-option-type ${video.type}`;
         typeSpan.textContent = video.type.toUpperCase();
@@ -201,8 +379,18 @@ function displayStreamOptions(videos) {
             typeSpan.textContent += ' (UNSUPPORTED)';
         }
 
+        badgesContainer.appendChild(typeSpan);
+
+        // Add resolution badge if available
+        if (video.resolution) {
+            const resSpan = document.createElement('span');
+            resSpan.className = 'stream-option-type resolution';
+            resSpan.textContent = video.resolution;
+            badgesContainer.appendChild(resSpan);
+        }
+
         label.appendChild(urlSpan);
-        label.appendChild(typeSpan);
+        label.appendChild(badgesContainer);
 
         option.appendChild(radio);
         option.appendChild(label);
@@ -264,6 +452,9 @@ window.startCasting = async function () {
             _isCasting = true;
             castBtn.style.display = 'none';
             stopBtn.style.display = 'block';
+
+            // Save state for persistence
+            saveState(ip);
         }
     } catch (e) {
         console.error('Cast error:', e);
@@ -299,6 +490,9 @@ window.stopCasting = async function () {
             castBtn.disabled = false;
             stopBtn.style.display = 'none';
             stopBtn.disabled = false;
+
+            // Clear saved state
+            clearState();
         } else {
             updateStatus(`Error: ${data.error}`, 'error');
             stopBtn.disabled = false;
@@ -352,8 +546,27 @@ function updateStreamStats(stats) {
     document.getElementById('stat-duration').textContent = `${stats.duration}s`;
     document.getElementById('stat-cache').textContent = stats.cacheHits || 0;
 
+    // Display frame rate if available
+    if (stats.frameRate) {
+        const fps = Math.round(stats.frameRate);
+        document.getElementById('stat-framerate').textContent = `${fps} FPS`;
+    } else {
+        document.getElementById('stat-framerate').textContent = '-';
+    }
+
     // Update graph
     updateRateGraph(stats.transferRate);
+}
+
+function resetStreamStats() {
+    // Reset all stat displays to default values
+    document.getElementById('stat-resolution').textContent = 'Unknown';
+    document.getElementById('stat-framerate').textContent = '-';
+    document.getElementById('stat-bitrate').textContent = '- Kbps';
+    document.getElementById('stat-transferred').textContent = '0 MB';
+    document.getElementById('stat-segments').textContent = '0';
+    document.getElementById('stat-duration').textContent = '0s';
+    document.getElementById('stat-cache').textContent = '0';
 }
 
 function updateRateGraph(currentRate) {

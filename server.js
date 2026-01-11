@@ -136,7 +136,7 @@ const CACHE_TTL_VOD = 60000; // 60 seconds for VOD
 const CACHE_TTL_LIVE = 4000; // 4 seconds for live streams (needs frequent updates)
 
 // Stream statistics tracking
-// Key: clientIp -> { totalBytes, startTime, lastActivity, resolution, bitrate }
+// Key: deviceIp -> { totalBytes, startTime, lastActivity, resolution, bitrate }
 const streamStats = new Map();
 
 // Playback tracking for delay calculation
@@ -171,6 +171,10 @@ const browser = mdns.createBrowser(mdns.tcp('googlecast'));
 
 // Active cast sessions (IP -> { client, player })
 const activeSessions = new Map();
+
+// Map device IPs to their streaming client IPs (for stats tracking)
+// Key: chromecastIp -> clientIp (the IP making proxy requests)
+const deviceToClientMap = new Map();
 
 browser.on('error', (err) => {
     console.error('[Discovery] mDNS error:', err.message || err);
@@ -517,6 +521,186 @@ async function extractIframesFromScripts(html, pageUrl) {
     return iframes;
 }
 
+// --- Helper: Detect Frame Rate ---
+async function detectFrameRate(videoUrl, type) {
+    try {
+        // For HLS, we'll extract from playlist during playback
+        // For MP4, try to parse from container headers
+        if (type === 'mp4') {
+            try {
+                // Request first 64KB of MP4 to parse atoms
+                const response = await axios({
+                    method: 'get',
+                    url: videoUrl,
+                    timeout: 3000,
+                    responseType: 'arraybuffer',
+                    headers: {
+                        'Range': 'bytes=0-65535' // First 64KB
+                    },
+                    validateStatus: (status) => status === 200 || status === 206
+                });
+
+                const buffer = Buffer.from(response.data);
+
+                // Look for mvhd (movie header) atom which contains timescale
+                const timescale = findMvhdTimescale(buffer);
+                if (timescale) {
+                    // Common timescales and their typical frame rates:
+                    // Note: Timescale is time units per second, not always FPS
+                    // These are educated guesses based on common encodings
+                    if (timescale === 600) return 24;        // 24 FPS (23.976 * 25 = 599.4)
+                    if (timescale === 24000) return 24;      // 24 FPS
+                    if (timescale === 23976) return 24;      // 23.976 FPS
+                    if (timescale === 25000) return 25;      // 25 FPS (PAL)
+                    if (timescale === 1000) return 30;       // Usually 30 FPS
+                    if (timescale === 30000) return 30;      // 30 FPS
+                    if (timescale === 29970) return 30;      // 29.97 FPS (NTSC)
+                    if (timescale === 48000) return 48;      // 48 FPS
+                    if (timescale === 50000) return 50;      // 50 FPS (PAL HD)
+                    if (timescale === 60000) return 60;      // 60 FPS
+                    if (timescale === 59940) return 60;      // 59.94 FPS
+
+                    // For uncommon timescales, timescale/1000 might work
+                    const estimatedFps = Math.round(timescale / 1000);
+                    if (estimatedFps >= 15 && estimatedFps <= 120) return estimatedFps;
+                }
+            } catch {
+                // Silently fail - frame rate detection is optional
+            }
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+// Helper to find timescale in mvhd atom
+function findMvhdTimescale(buffer) {
+    try {
+        // Look for 'mvhd' atom signature
+        const mvhdIndex = buffer.indexOf('mvhd');
+        if (mvhdIndex === -1) return null;
+
+        // mvhd structure:
+        // - 1 byte: version
+        // - 3 bytes: flags
+        // - Version 0: 4 bytes creation + 4 bytes modification + 4 bytes timescale
+        // - Version 1: 8 bytes creation + 8 bytes modification + 4 bytes timescale
+
+        const versionOffset = mvhdIndex + 4; // After 'mvhd' string
+        if (versionOffset >= buffer.length) return null;
+
+        const version = buffer[versionOffset];
+        let timescaleOffset;
+
+        if (version === 1) {
+            // Version 1: 1+3+8+8 = 20 bytes before timescale
+            timescaleOffset = mvhdIndex + 4 + 20;
+        } else {
+            // Version 0: 1+3+4+4 = 12 bytes before timescale
+            timescaleOffset = mvhdIndex + 4 + 12;
+        }
+
+        if (timescaleOffset + 4 > buffer.length) return null;
+
+        // Read 32-bit big-endian integer
+        const timescale = buffer.readUInt32BE(timescaleOffset);
+
+        // Sanity check: timescale should be reasonable (1-600000)
+        if (timescale < 1 || timescale > 600000) return null;
+
+        return timescale;
+    } catch {
+        return null;
+    }
+}
+
+// --- Helper: Detect Resolution ---
+async function detectResolution(videoUrl, type) {
+    try {
+        // Method 1: Check URL patterns (fastest)
+        const urlPatterns = [
+            { regex: /(\d{3,4})p/i, format: (m) => `${m[1]}p` },                    // 720p, 1080p
+            { regex: /(\d{3,4})x(\d{3,4})/i, format: (m) => `${m[2]}p` },          // 1280x720
+            { regex: /_hd\b|\/hd\b/i, format: () => 'HD' },                        // _hd, /hd
+            { regex: /_sd\b|\/sd\b/i, format: () => 'SD' },                        // _sd, /sd
+            { regex: /_fhd\b|\/fhd\b/i, format: () => '1080p' },                   // _fhd, /fhd
+            { regex: /4k|uhd|2160/i, format: () => '4K' },                         // 4k, uhd, 2160
+            { regex: /quality[=_](\d+)/i, format: (m) => `${m[1]}p` }              // quality=720
+        ];
+
+        for (const pattern of urlPatterns) {
+            const match = videoUrl.match(pattern.regex);
+            if (match) {
+                return pattern.format(match);
+            }
+        }
+
+        // Method 2: For HLS, fetch playlist to check for resolution info
+        if (type === 'hls' && videoUrl.includes('.m3u8')) {
+            try {
+                const response = await axios({
+                    method: 'get',
+                    url: videoUrl,
+                    timeout: 3000,
+                    maxContentLength: 50000, // Only read first 50KB
+                    validateStatus: (status) => status === 200
+                });
+
+                const playlist = response.data;
+
+                // Check for master playlist with resolution info
+                const resMatch = playlist.match(/#EXT-X-STREAM-INF:[^\n]*RESOLUTION=(\d+)x(\d+)/);
+                if (resMatch) {
+                    const height = parseInt(resMatch[2]);
+                    return `${height}p`;
+                }
+
+                // Check for bandwidth (estimate quality from bitrate)
+                const bandwidthMatch = playlist.match(/#EXT-X-STREAM-INF:[^\n]*BANDWIDTH=(\d+)/);
+                if (bandwidthMatch) {
+                    const bandwidth = parseInt(bandwidthMatch[1]);
+                    if (bandwidth > 5000000) return '1080p+';
+                    if (bandwidth > 2500000) return '720p';
+                    if (bandwidth > 1000000) return '480p';
+                    return 'SD';
+                }
+            } catch {
+                // Silently fail - resolution detection is optional
+            }
+        }
+
+        // Method 3: For MP4, check common naming or use HEAD request for file size
+        if (type === 'mp4') {
+            try {
+                const response = await axios({
+                    method: 'head',
+                    url: videoUrl,
+                    timeout: 2000,
+                    validateStatus: (status) => status === 200
+                });
+
+                const contentLength = parseInt(response.headers['content-length'] || '0');
+                if (contentLength > 0) {
+                    // Very rough estimation based on file size
+                    const sizeMB = contentLength / (1024 * 1024);
+                    if (sizeMB > 2000) return '1080p+';
+                    if (sizeMB > 800) return '720p';
+                    if (sizeMB > 300) return '480p';
+                    return 'SD';
+                }
+            } catch {
+                // Silently fail
+            }
+        }
+
+        return null; // Unknown resolution
+    } catch {
+        return null;
+    }
+}
+
 // --- API: Extract Video URL ---
 app.post('/api/extract', apiLimiter, async (req, res) => {
     const { url } = req.body;
@@ -598,11 +782,16 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
 
             // Check if it's MJPEG and mark it
             const isMjpeg = resolvedUrl.match(/mjpe?g|jpg.*video/i);
+            const type = isMjpeg ? 'mjpeg' : (resolvedUrl.includes('.m3u8') ? 'hls' : 'mp4');
+
+            // Detect resolution
+            const resolution = await detectResolution(resolvedUrl, type);
 
             videos.push({
                 url: resolvedUrl,
                 referer: videoReferer,
-                type: isMjpeg ? 'mjpeg' : (resolvedUrl.includes('.m3u8') ? 'hls' : 'mp4'),
+                type: type,
+                resolution: resolution,
                 unsupported: isMjpeg
             });
         }
@@ -614,6 +803,10 @@ app.post('/api/extract', apiLimiter, async (req, res) => {
         });
 
         console.log(`[Extract] Found ${videos.length} video stream(s) at ${url}`);
+        videos.forEach((v, i) => {
+            const resInfo = v.resolution ? ` (${v.resolution})` : '';
+            console.log(`[Extract]   ${i + 1}. ${v.type.toUpperCase()}${resInfo}: ${v.url.substring(0, 80)}...`);
+        });
 
         res.json({ videos });
     } catch (e) {
@@ -694,20 +887,43 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
     if (!url) return res.status(400).json({ error: 'URL parameter required' });
 
-    // Initialize or get stream stats for this client
-    if (!streamStats.has(clientIp)) {
-        streamStats.set(clientIp, {
+    // Find which device this client belongs to
+    let deviceIp = null;
+
+    // Normalize localhost representations
+    let normalizedClientIp = clientIp;
+    if (clientIp === '127.0.0.1' || clientIp === '::ffff:127.0.0.1') {
+        normalizedClientIp = '::1';
+    }
+
+    for (const [devIp, mappedClientIp] of deviceToClientMap.entries()) {
+        if (mappedClientIp === clientIp || mappedClientIp === normalizedClientIp) {
+            deviceIp = devIp;
+            break;
+        }
+    }
+
+    // If no mapping found, use client IP as fallback (shouldn't happen normally)
+    if (!deviceIp) {
+        deviceIp = clientIp;
+        console.log(`[Proxy] No device mapping found for ${clientIp}, using as device IP`);
+    }
+
+    // Initialize or get stream stats for this device
+    if (!streamStats.has(deviceIp)) {
+        streamStats.set(deviceIp, {
             totalBytes: 0,
             startTime: Date.now(),
             lastActivity: Date.now(),
             resolution: 'Unknown',
             bitrate: 0,
             segmentCount: 0,
-            cacheHits: 0
+            cacheHits: 0,
+            frameRate: null
         });
     }
 
-    const stats = streamStats.get(clientIp);
+    const stats = streamStats.get(deviceIp);
     stats.lastActivity = Date.now();
 
     if (!url) return res.status(400).json({ error: 'URL parameter required' });
@@ -813,6 +1029,42 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
                             const duration = (Date.now() - stats.startTime) / 1000;
                             if (duration > 10) {
                                 stats.bitrate = Math.round((stats.totalBytes * 8) / duration / 1000); // Kbps
+                            }
+                        }
+                    }
+
+                    // Extract frame rate if available (common in master playlists)
+                    const frameRateMatch = originalM3u8.match(/FRAME-RATE=([\d.]+)/);
+                    if (frameRateMatch && !stats.frameRate) {
+                        stats.frameRate = parseFloat(frameRateMatch[1]);
+                        console.log(`[Proxy] Detected frame rate from playlist: ${stats.frameRate} FPS`);
+                        // Broadcast the updated stats with frame rate
+                        broadcast({
+                            type: 'streamStats',
+                            deviceIp: deviceIp,
+                            stats: { ...stats }
+                        });
+                    } else if (!stats.frameRate) {
+                        // Fallback: Try to infer from target duration
+                        // Most live sports streams are 30 or 60 FPS
+                        // Unfortunately, HLS doesn't always include frame rate info
+                        // We can only make educated guesses based on segment duration
+                        const targetDuration = originalM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                        if (targetDuration && stats.segmentCount > 5) {
+                            // Common patterns: 2-6 second segments usually = 30fps
+                            const segDuration = parseInt(targetDuration[1]);
+                            if (segDuration <= 2) {
+                                stats.frameRate = 60; // Short segments often mean high FPS
+                            } else if (segDuration >= 3 && segDuration <= 10) {
+                                stats.frameRate = 30; // Standard segment length
+                            }
+                            if (stats.frameRate) {
+                                console.log(`[Proxy] Estimated frame rate: ${stats.frameRate} FPS (based on segment duration: ${segDuration}s)`);
+                                broadcast({
+                                    type: 'streamStats',
+                                    deviceIp: deviceIp,
+                                    stats: { ...stats }
+                                });
                             }
                         }
                     }
@@ -964,17 +1216,16 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
             const duration = (Date.now() - stats.startTime) / 1000; // seconds
             const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0; // KB/s
 
-            // Get the latest delay from playback tracking
+            // Get the latest delay from playback tracking for this device
             let currentDelay = 0;
-            for (const [_ip, tracking] of playbackTracking.entries()) {
-                if (tracking.lastDelay !== undefined) {
-                    currentDelay = tracking.lastDelay;
-                    break; // Assume single active session
-                }
+            const tracking = playbackTracking.get(deviceIp);
+            if (tracking && tracking.lastDelay !== undefined) {
+                currentDelay = tracking.lastDelay;
             }
 
             broadcast({
                 type: 'streamStats',
+                deviceIp: deviceIp, // Include device IP so frontend knows which device these stats are for
                 stats: {
                     totalBytes: stats.totalBytes,
                     totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
@@ -984,7 +1235,8 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
                     bitrate: stats.bitrate,
                     segmentCount: stats.segmentCount,
                     cacheHits: stats.cacheHits,
-                    delay: currentDelay
+                    delay: currentDelay,
+                    frameRate: stats.frameRate
                 }
             });
         });
@@ -1040,13 +1292,24 @@ app.post('/api/cast', (req, res) => {
         activeSessions.delete(ip);
     }
 
-    // Clear tracking and stats for fresh start
+    // Clear tracking and stats for this specific device
     playbackTracking.delete(ip);
-    streamStats.clear();
-    console.log('[Cast] Statistics reset for new stream');
+    streamStats.delete(ip);
+    deviceToClientMap.delete(ip);
+    console.log('[Cast] Statistics reset for new stream on', ip);
+
+    // Resolve local IP (needed for proxy URL and mock device mapping)
+    const localIp = getLocalIp();
 
     // Check if this is a mock device
     const isMockDevice = IS_DEV && devices[ip]?.isMock;
+
+    // Map device IP to its client IP (the Chromecast's IP when making proxy requests)
+    // For real Chromecasts, the device IP and client IP are the same
+    // For mock devices, the client IP is the server's local IP (since it makes requests to http://localIP:port)
+    const clientIpForMapping = isMockDevice ? localIp : ip;
+    deviceToClientMap.set(ip, clientIpForMapping);
+    console.log(`[Cast] Mapped device ${ip} to client ${clientIpForMapping}${isMockDevice ? ' (mock device)' : ''}`);
 
     let client, launchReceiver;
     if (isMockDevice) {
@@ -1064,8 +1327,6 @@ app.post('/api/cast', (req, res) => {
         };
     }
 
-    // Resolve local IP for callback
-    const localIp = getLocalIp();
     // Append Referer to the proxy URL
     const finalUrl = proxy
         ? `http://${localIp}:${PORT}/proxy?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(referer || '')}`
@@ -1073,14 +1334,36 @@ app.post('/api/cast', (req, res) => {
 
     console.log(`[Cast] Final Media URL: ${finalUrl}`);
 
-    // Determine content type
+    // Determine content type and video type
     let contentType = 'video/mp4';
+    let videoType = 'mp4';
     const lowerUrl = finalUrl.toLowerCase();
     if (lowerUrl.includes('.m3u8') || lowerUrl.includes('playlist')) {
         contentType = 'application/x-mpegURL';
+        videoType = 'hls';
     }
-    if (lowerUrl.includes('.webm')) contentType = 'video/webm';
+    if (lowerUrl.includes('.webm')) {
+        contentType = 'video/webm';
+        videoType = 'webm';
+    }
     console.log(`[Cast] Content-Type: ${contentType}`);
+
+    // Detect frame rate for MP4 streams upfront (HLS will be detected during playback)
+    if (videoType === 'mp4') {
+        detectFrameRate(url, 'mp4').then(fps => {
+            if (fps && streamStats.has(ip)) {
+                streamStats.get(ip).frameRate = fps;
+                console.log(`[Cast] Detected MP4 frame rate: ${fps} FPS`);
+                broadcast({
+                    type: 'streamStats',
+                    deviceIp: ip,
+                    stats: { ...streamStats.get(ip) }
+                });
+            }
+        }).catch(err => {
+            console.log(`[Cast] Could not detect MP4 frame rate: ${err.message}`);
+        });
+    }
 
     client.connect(ip, () => {
         console.log(`[Cast] Connected to device ${ip}`);
@@ -1167,6 +1450,7 @@ app.post('/api/cast', (req, res) => {
 
                     broadcast({
                         type: 'playerStatus',
+                        deviceIp: ip, // Include device IP so frontend can filter
                         status,
                         delay
                     });
@@ -1177,9 +1461,10 @@ app.post('/api/cast', (req, res) => {
                     console.log('[Cast] Player closed for', ip);
                     activeSessions.delete(ip);
                     playbackTracking.delete(ip);
+                    deviceToClientMap.delete(ip);
 
-                    // Clear stream statistics
-                    streamStats.clear();
+                    // Clear stream statistics for this device
+                    streamStats.delete(ip);
 
                     broadcast({ type: 'status', status: 'Playback ended' });
                 });
@@ -1195,8 +1480,29 @@ app.post('/api/cast', (req, res) => {
         if (!res.headersSent) res.status(500).json({ error: 'Client error: ' + err.message });
         activeSessions.delete(ip);
         playbackTracking.delete(ip);
-        streamStats.clear();
+        deviceToClientMap.delete(ip);
+        streamStats.delete(ip);
         client.close();
+    });
+});
+
+// --- API: Get Session State ---
+app.get('/api/session/:ip', (req, res) => {
+    const { ip } = req.params;
+
+    const session = activeSessions.get(ip);
+    if (!session) {
+        return res.json({ active: false });
+    }
+
+    const stats = streamStats.get(ip);
+    const tracking = playbackTracking.get(ip);
+
+    res.json({
+        active: true,
+        stats: stats || null,
+        tracking: tracking || null,
+        hasPlayer: !!session.player
     });
 });
 
@@ -1229,9 +1535,10 @@ app.post('/api/stop', (req, res) => {
             client.close();
             activeSessions.delete(ip);
             playbackTracking.delete(ip);
+            deviceToClientMap.delete(ip);
 
-            // Clear stream statistics
-            streamStats.clear();
+            // Clear stream statistics for this device
+            streamStats.delete(ip);
 
             broadcast({ type: 'status', status: 'Playback stopped' });
             res.json({ status: 'stopped' });
@@ -1239,6 +1546,8 @@ app.post('/api/stop', (req, res) => {
     } catch (err) {
         console.error('[Stop] Error stopping playback:', err);
         activeSessions.delete(ip);
+        deviceToClientMap.delete(ip);
+        streamStats.delete(ip);
         res.status(500).json({ error: 'Failed to stop playback: ' + err.message });
     }
 });

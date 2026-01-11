@@ -303,6 +303,10 @@ select:focus {
     background: #ef4444;
 }
 
+.stream-option-type.resolution {
+    background: #8b5cf6;
+}
+
 .stream-option-unsupported {
     opacity: 0.5;
     cursor: not-allowed;
