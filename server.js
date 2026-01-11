@@ -147,6 +147,12 @@ const playbackTracking = new Map();
 // Key: deviceIp -> { bufferingEvents, totalBufferingTime, lastBufferStart, lastState, sessionStartTime }
 const bufferHealthTracking = new Map();
 
+// Stream stall detection and recovery
+// Key: deviceIp -> { lastProxyRequest, bufferingStartTime, stallDetected, recoveryAttempts, streamUrl, referer }
+const streamRecovery = new Map();
+const MAX_RECOVERY_ATTEMPTS = 3;
+const STALL_TIMEOUT = 15000; // 15 seconds of buffering = stalled
+
 // --- Discovery ---
 const devices = {};
 const deviceLastSeen = new Map(); // Track when devices were last seen for staleness detection
@@ -1032,6 +1038,141 @@ async function attemptReconnect(deviceIp) {
 setInterval(checkConnectionHealth, HEARTBEAT_INTERVAL);
 console.log('[Health] Connection monitoring started');
 
+// --- Stream Stall Detection and Recovery ---
+function trackStreamActivity(deviceIp) {
+    const recovery = streamRecovery.get(deviceIp);
+    if (recovery) {
+        recovery.lastProxyRequest = Date.now();
+        recovery.stallDetected = false;
+    }
+}
+
+function initializeStreamRecovery(deviceIp, streamUrl, referer) {
+    streamRecovery.set(deviceIp, {
+        lastProxyRequest: Date.now(),
+        bufferingStartTime: null,
+        stallDetected: false,
+        recoveryAttempts: 0,
+        streamUrl,
+        referer
+    });
+    console.log(`[Recovery] Initialized stall detection for ${deviceIp}`);
+}
+
+async function checkStreamStalls() {
+    const now = Date.now();
+
+    for (const [deviceIp, recovery] of streamRecovery.entries()) {
+        const bufferHealth = bufferHealthTracking.get(deviceIp);
+
+        // Check if stream is buffering
+        if (bufferHealth && bufferHealth.lastState === 'BUFFERING' && bufferHealth.lastBufferStart) {
+            const bufferingDuration = now - bufferHealth.lastBufferStart;
+
+            // If buffering for more than STALL_TIMEOUT and no recent proxy requests
+            const timeSinceLastRequest = now - recovery.lastProxyRequest;
+            if (bufferingDuration > STALL_TIMEOUT && timeSinceLastRequest > STALL_TIMEOUT) {
+                if (!recovery.stallDetected && recovery.recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
+                    recovery.stallDetected = true;
+                    recovery.recoveryAttempts++;
+                    console.log(`[Recovery] Stream stalled for ${deviceIp} (${Math.round(bufferingDuration / 1000)}s), attempting recovery (${recovery.recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS})`);
+
+                    await attemptStreamRecovery(deviceIp, recovery);
+                }
+            }
+        } else {
+            // Stream is playing normally, reset recovery attempts
+            if (recovery.stallDetected && bufferHealth && bufferHealth.lastState === 'PLAYING') {
+                console.log(`[Recovery] Stream recovered for ${deviceIp}, resetting recovery counter`);
+                recovery.recoveryAttempts = 0;
+                recovery.stallDetected = false;
+            }
+        }
+    }
+}
+
+async function attemptStreamRecovery(deviceIp, recovery) {
+    try {
+        const session = activeSessions.get(deviceIp);
+        if (!session) {
+            console.log(`[Recovery] No active session for ${deviceIp}, cannot recover`);
+            return;
+        }
+
+        const { player } = session;
+
+        // Broadcast recovery attempt to frontend
+        broadcast({
+            type: 'streamRecovery',
+            deviceIp,
+            status: 'attempting',
+            attempt: recovery.recoveryAttempts,
+            maxAttempts: MAX_RECOVERY_ATTEMPTS
+        });
+
+        // Stop current playback
+        console.log(`[Recovery] Stopping stalled stream on ${deviceIp}`);
+        await new Promise((resolve) => {
+            player.stop((err) => {
+                if (err) console.error('[Recovery] Stop error:', err.message);
+                resolve();
+            });
+        });
+
+        // Wait a moment for cleanup
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Restart stream
+        console.log(`[Recovery] Restarting stream on ${deviceIp}`);
+        const localIp = getLocalIp();
+        const media = {
+            contentId: `http://${localIp}:${PORT}/proxy?url=${encodeURIComponent(recovery.streamUrl)}&referer=${encodeURIComponent(recovery.referer || '')}`,
+            contentType: 'application/x-mpegURL',
+            streamType: 'LIVE'
+        };
+
+        player.load(media, { autoplay: true }, (err, _status) => {
+            if (err) {
+                console.error(`[Recovery] Recovery failed for ${deviceIp}:`, err.message);
+                broadcast({
+                    type: 'streamRecovery',
+                    deviceIp,
+                    status: 'failed',
+                    attempt: recovery.recoveryAttempts,
+                    maxAttempts: MAX_RECOVERY_ATTEMPTS
+                });
+
+                // If max attempts reached, give up
+                if (recovery.recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+                    console.log(`[Recovery] Max recovery attempts reached for ${deviceIp}, giving up`);
+                    broadcast({
+                        type: 'streamRecovery',
+                        deviceIp,
+                        status: 'giveup',
+                        message: 'Stream recovery failed after multiple attempts. Please restart manually.'
+                    });
+                }
+            } else {
+                console.log(`[Recovery] Stream restarted successfully for ${deviceIp}`);
+                recovery.lastProxyRequest = Date.now();
+                recovery.stallDetected = false;
+                broadcast({
+                    type: 'streamRecovery',
+                    deviceIp,
+                    status: 'success',
+                    attempt: recovery.recoveryAttempts
+                });
+            }
+        });
+    } catch (error) {
+        console.error(`[Recovery] Recovery error for ${deviceIp}:`, error.message);
+    }
+}
+
+// Start stall detection monitoring (check every 10 seconds)
+setInterval(checkStreamStalls, 10000);
+console.log('[Recovery] Stream stall detection started');
+
 // --- Buffer Health Tracking ---
 function trackBufferHealth(deviceIp, playerState) {
     let tracking = bufferHealthTracking.get(deviceIp);
@@ -1130,6 +1271,9 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
 
     // Update connection heartbeat (device is making requests = healthy)
     updateHeartbeat(deviceIp);
+
+    // Track stream activity for stall detection
+    trackStreamActivity(deviceIp);
 
     // Initialize or get stream stats for this device
     if (!streamStats.has(deviceIp)) {
@@ -1650,6 +1794,9 @@ app.post('/api/cast', (req, res) => {
                 // Initialize connection health monitoring
                 initializeConnectionHealth(ip);
 
+                // Initialize stream recovery tracking
+                initializeStreamRecovery(ip, url, referer || '');
+
                 // Monitor status
                 player.on('status', (status) => {
                     console.log('[Cast] Player Status Update:', status.playerState);
@@ -1697,6 +1844,7 @@ app.post('/api/cast', (req, res) => {
                     activeSessions.delete(ip);
                     playbackTracking.delete(ip);
                     bufferHealthTracking.delete(ip);
+                    streamRecovery.delete(ip);
                     deviceToClientMap.delete(ip);
                     connectionHealth.delete(ip);
 
@@ -1773,6 +1921,7 @@ app.post('/api/stop', (req, res) => {
             activeSessions.delete(ip);
             playbackTracking.delete(ip);
             bufferHealthTracking.delete(ip);
+            streamRecovery.delete(ip);
             deviceToClientMap.delete(ip);
             connectionHealth.delete(ip);
 
@@ -1785,6 +1934,7 @@ app.post('/api/stop', (req, res) => {
     } catch (err) {
         console.error('[Stop] Error stopping playback:', err);
         activeSessions.delete(ip);
+        streamRecovery.delete(ip);
         deviceToClientMap.delete(ip);
         streamStats.delete(ip);
         res.status(500).json({ error: 'Failed to stop playback: ' + err.message });

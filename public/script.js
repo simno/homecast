@@ -196,6 +196,13 @@ ws.onmessage = (event) => {
             updateConnectionHealth(data.state, data.message);
         }
     }
+    if (data.type === 'streamRecovery') {
+        // Only show recovery updates for the currently selected device
+        const selectedDeviceIp = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
+        if (data.deviceIp === selectedDeviceIp) {
+            handleStreamRecovery(data);
+        }
+    }
 };
 
 ws.onerror = () => {
@@ -645,6 +652,20 @@ function updateConnectionHealth(state, message) {
         }
     } else {
         healthContainer.style.display = 'none';
+    }
+}
+
+function handleStreamRecovery(data) {
+    console.log('[Recovery]', data);
+
+    if (data.status === 'attempting') {
+        updateStatus(`🔄 Recovering stream (attempt ${data.attempt}/${data.maxAttempts})...`, 'loading');
+    } else if (data.status === 'success') {
+        updateStatus('✅ Stream recovered successfully', 'success');
+    } else if (data.status === 'failed') {
+        updateStatus(`⚠️ Recovery attempt ${data.attempt} failed`, 'error');
+    } else if (data.status === 'giveup') {
+        updateStatus('❌ Stream recovery failed - please restart manually', 'error');
     }
 }
 
