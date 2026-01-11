@@ -1080,6 +1080,19 @@ async function checkStreamStalls() {
                     await attemptStreamRecovery(deviceIp, recovery);
                 }
             }
+        } else if (bufferHealth && bufferHealth.lastState === 'IDLE') {
+            // Check if stream went IDLE unexpectedly (not due to user stopping)
+            const session = activeSessions.get(deviceIp);
+            const timeSinceLastRequest = now - recovery.lastProxyRequest;
+
+            // If we have an active session, went IDLE, and no recent activity = unexpected failure
+            if (session && timeSinceLastRequest > 10000 && !recovery.stallDetected && recovery.recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
+                recovery.stallDetected = true;
+                recovery.recoveryAttempts++;
+                console.log(`[Recovery] Stream went IDLE unexpectedly for ${deviceIp}, attempting recovery (${recovery.recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS})`);
+
+                await attemptStreamRecovery(deviceIp, recovery);
+            }
         } else {
             // Stream is playing normally, reset recovery attempts
             if (recovery.stallDetected && bufferHealth && bufferHealth.lastState === 'PLAYING') {
