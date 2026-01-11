@@ -1053,6 +1053,7 @@ function initializeStreamRecovery(deviceIp, streamUrl, referer) {
         bufferingStartTime: null,
         stallDetected: false,
         recoveryAttempts: 0,
+        lastRecoveryAttempt: null,
         streamUrl,
         referer
     });
@@ -1075,6 +1076,7 @@ async function checkStreamStalls() {
                 if (!recovery.stallDetected && recovery.recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
                     recovery.stallDetected = true;
                     recovery.recoveryAttempts++;
+                    recovery.lastRecoveryAttempt = now;
                     console.log(`[Recovery] Stream stalled for ${deviceIp} (${Math.round(bufferingDuration / 1000)}s), attempting recovery (${recovery.recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS})`);
 
                     await attemptStreamRecovery(deviceIp, recovery);
@@ -1085,20 +1087,31 @@ async function checkStreamStalls() {
             const session = activeSessions.get(deviceIp);
             const timeSinceLastRequest = now - recovery.lastProxyRequest;
 
-            // If we have an active session, went IDLE, and no recent activity = unexpected failure
-            if (session && timeSinceLastRequest > 10000 && !recovery.stallDetected && recovery.recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
+            // Avoid rapid recovery attempts - wait at least 5s since last recovery
+            const timeSinceLastRecovery = recovery.lastRecoveryAttempt ? (now - recovery.lastRecoveryAttempt) : Infinity;
+
+            // If we have an active session, went IDLE, no recent activity, and enough time since last recovery
+            if (session && timeSinceLastRequest > 15000 && timeSinceLastRecovery > 5000 && !recovery.stallDetected && recovery.recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
                 recovery.stallDetected = true;
                 recovery.recoveryAttempts++;
+                recovery.lastRecoveryAttempt = now;
                 console.log(`[Recovery] Stream went IDLE unexpectedly for ${deviceIp}, attempting recovery (${recovery.recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS})`);
 
                 await attemptStreamRecovery(deviceIp, recovery);
             }
         } else {
-            // Stream is playing normally, reset recovery attempts
+            // Stream is playing normally, reset recovery attempts after 30s of stable playback
             if (recovery.stallDetected && bufferHealth && bufferHealth.lastState === 'PLAYING') {
-                console.log(`[Recovery] Stream recovered for ${deviceIp}, resetting recovery counter`);
-                recovery.recoveryAttempts = 0;
-                recovery.stallDetected = false;
+                const timeSinceLastRequest = now - recovery.lastProxyRequest;
+                // Only reset if we've had recent activity (stream is actually playing)
+                if (timeSinceLastRequest < 10000) {
+                    const timeSinceLastRecovery = recovery.lastRecoveryAttempt ? (now - recovery.lastRecoveryAttempt) : 0;
+                    if (timeSinceLastRecovery > 30000) {
+                        console.log(`[Recovery] Stream recovered for ${deviceIp}, resetting recovery counter`);
+                        recovery.recoveryAttempts = 0;
+                        recovery.stallDetected = false;
+                    }
+                }
             }
         }
     }
@@ -1123,11 +1136,13 @@ async function attemptStreamRecovery(deviceIp, recovery) {
             maxAttempts: MAX_RECOVERY_ATTEMPTS
         });
 
-        // Stop current playback
+        // Stop current playback (ignore errors if session already closed)
         console.log(`[Recovery] Stopping stalled stream on ${deviceIp}`);
         await new Promise((resolve) => {
             player.stop((err) => {
-                if (err) console.error('[Recovery] Stop error:', err.message);
+                if (err && !err.message.includes('INVALID_MEDIA_SESSION_ID')) {
+                    console.error('[Recovery] Stop error:', err.message);
+                }
                 resolve();
             });
         });
