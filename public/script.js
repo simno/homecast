@@ -561,11 +561,49 @@ function updateStreamStats(stats) {
         }
     }
 
+    // Format bitrate (e.g., "4.0 Mbps" or "800 Kbps")
+    let bitrateDisplay = '- Kbps';
+    if (stats.bitrate) {
+        if (stats.bitrate >= 1000) {
+            bitrateDisplay = `${(stats.bitrate / 1000).toFixed(1)} Mbps`;
+        } else {
+            bitrateDisplay = `${stats.bitrate} Kbps`;
+        }
+    }
+
+    // Format transferred size (e.g., "1.92 GB" or "512 MB")
+    let transferredDisplay = '0 MB';
+    if (stats.totalMB) {
+        const mb = parseFloat(stats.totalMB);
+        if (mb >= 1000) {
+            transferredDisplay = `${(mb / 1024).toFixed(2)} GB`;
+        } else {
+            transferredDisplay = `${mb.toFixed(2)} MB`;
+        }
+    }
+
+    // Format duration (e.g., "1h 10m 56s")
+    let durationDisplay = '0s';
+    if (stats.duration) {
+        const totalSeconds = parseInt(stats.duration);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        if (hours > 0) {
+            durationDisplay = `${hours}h ${minutes}m ${seconds}s`;
+        } else if (minutes > 0) {
+            durationDisplay = `${minutes}m ${seconds}s`;
+        } else {
+            durationDisplay = `${seconds}s`;
+        }
+    }
+
     document.getElementById('stat-resolution').textContent = resolutionDisplay;
-    document.getElementById('stat-bitrate').textContent = stats.bitrate ? `${stats.bitrate} Kbps` : '- Kbps';
-    document.getElementById('stat-transferred').textContent = `${stats.totalMB} MB`;
+    document.getElementById('stat-bitrate').textContent = bitrateDisplay;
+    document.getElementById('stat-transferred').textContent = transferredDisplay;
     document.getElementById('stat-segments').textContent = stats.segmentCount || 0;
-    document.getElementById('stat-duration').textContent = `${stats.duration}s`;
+    document.getElementById('stat-duration').textContent = durationDisplay;
     document.getElementById('stat-cache').textContent = stats.cacheHits || 0;
 
     // Display frame rate if available
