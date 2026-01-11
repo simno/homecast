@@ -108,7 +108,15 @@
                 </svg>
                 Stop Casting
             </button>
-            
+
+            <!-- Connection Health Indicator -->
+            <div class="connection-health" id="connection-health" style="display: none;">
+                <div class="health-indicator">
+                    <span class="health-dot" id="health-dot"></span>
+                    <span class="health-text" id="health-text">Connected</span>
+                </div>
+            </div>
+
             <div class="status-card" id="status-card" style="display:none; margin-top: 16px;">
                 <div class="status-icon">
                     <svg id="status-spinner" class="spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
@@ -160,6 +168,10 @@
                 <div>
                     <strong>Cache Hits:</strong>
                     <div id="stat-cache" style="color: #0066cc;">0</div>
+                </div>
+                <div>
+                    <strong>Buffer Health:</strong>
+                    <div id="stat-buffer-health" style="color: #0066cc;">-</div>
                 </div>
             </div>
 

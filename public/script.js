@@ -136,6 +136,11 @@ ws.onmessage = (event) => {
         let message = `Playback: ${state}`;
         let type = 'info';
 
+        // Update buffer health if available
+        if (data.bufferHealth) {
+            updateBufferHealth(data.bufferHealth);
+        }
+
         if (state === 'PLAYING') {
             message = '🎬 Now Playing';
             type = 'success';
@@ -180,6 +185,16 @@ ws.onmessage = (event) => {
         }
 
         updateStatus(message, type);
+    }
+    if (data.type === 'connectionHealth') {
+        console.log('[ConnectionHealth] Received:', data);
+        // Only show health updates for the currently selected device
+        const selectedDeviceIp = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
+        console.log('[ConnectionHealth] Selected device:', selectedDeviceIp, 'Message device:', data.deviceIp);
+        if (data.deviceIp === selectedDeviceIp) {
+            console.log('[ConnectionHealth] Updating health UI');
+            updateConnectionHealth(data.state, data.message);
+        }
     }
 };
 
@@ -558,6 +573,31 @@ function updateStreamStats(stats) {
     updateRateGraph(stats.transferRate);
 }
 
+function updateBufferHealth(bufferHealth) {
+    if (!bufferHealth) return;
+
+    const { healthScore, bufferingEvents, totalBufferingTime } = bufferHealth;
+    const healthEl = document.getElementById('stat-buffer-health');
+
+    if (healthEl) {
+        let displayText = `${healthScore}%`;
+        if (bufferingEvents > 0) {
+            displayText += ` (${bufferingEvents} events, ${totalBufferingTime}s)`;
+        }
+
+        healthEl.textContent = displayText;
+
+        // Color code based on health score
+        if (healthScore >= 95) {
+            healthEl.style.color = '#00aa00'; // Green
+        } else if (healthScore >= 85) {
+            healthEl.style.color = '#ff9900'; // Orange
+        } else {
+            healthEl.style.color = '#cc0000'; // Red
+        }
+    }
+}
+
 function resetStreamStats() {
     // Reset all stat displays to default values
     document.getElementById('stat-resolution').textContent = 'Unknown';
@@ -567,11 +607,51 @@ function resetStreamStats() {
     document.getElementById('stat-segments').textContent = '0';
     document.getElementById('stat-duration').textContent = '0s';
     document.getElementById('stat-cache').textContent = '0';
+    document.getElementById('stat-buffer-health').textContent = '-';
+    document.getElementById('stat-buffer-health').style.color = '#0066cc';
+}
+
+function updateConnectionHealth(state, message) {
+    console.log('[ConnectionHealth] updateConnectionHealth called:', state, message, '_isCasting:', _isCasting);
+    const healthContainer = document.getElementById('connection-health');
+    const healthDot = document.getElementById('health-dot');
+    const healthText = document.getElementById('health-text');
+
+    // Show health indicator when we have a state (connection monitoring is active)
+    if (state) {
+        console.log('[ConnectionHealth] Showing health indicator');
+        healthContainer.style.display = 'block';
+
+        // Remove all state classes
+        healthDot.className = 'health-dot';
+
+        // Add appropriate state class
+        healthDot.classList.add(state);
+
+        // Update text
+        healthText.textContent = message || {
+            'healthy': 'Connected',
+            'degraded': 'Connection unstable',
+            'unhealthy': 'Connection lost',
+            'reconnecting': 'Reconnecting...',
+            'failed': 'Connection failed'
+        }[state];
+
+        // If connection is unhealthy or failed, show warning in status
+        if (state === 'unhealthy' || state === 'failed') {
+            updateStatus(`⚠️ ${healthText.textContent}`, 'error');
+        } else if (state === 'healthy') {
+            updateStatus('🎬 Streaming', 'success');
+        }
+    } else {
+        healthContainer.style.display = 'none';
+    }
 }
 
 function updateRateGraph(currentRate) {
-    // Add current rate to history
-    rateHistory.push(currentRate);
+    // Add current rate to history (ensure it's a valid number)
+    const rate = parseFloat(currentRate) || 0;
+    rateHistory.push(rate);
 
     // Keep only last 60 data points
     if (rateHistory.length > MAX_HISTORY) {
@@ -579,7 +659,7 @@ function updateRateGraph(currentRate) {
     }
 
     // Update current rate display
-    document.getElementById('graph-current-rate').textContent = `${currentRate} KB/s`;
+    document.getElementById('graph-current-rate').textContent = `${rate} KB/s`;
 
     // Draw graph
     const canvas = document.getElementById('rate-graph');
@@ -592,11 +672,15 @@ function updateRateGraph(currentRate) {
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Don't draw if no data
+    // Don't draw if no data or all zeros
     if (rateHistory.length < 2) return;
 
+    // Filter out invalid values for calculating scale
+    const validRates = rateHistory.filter(r => !isNaN(r) && r !== null && r !== undefined);
+    if (validRates.length === 0) return;
+
     // Calculate scale
-    const maxRate = Math.max(...rateHistory, 100); // Minimum scale of 100 KB/s
+    const maxRate = Math.max(...validRates, 100); // Minimum scale of 100 KB/s
     const minRate = 0;
 
     // Update Y-axis labels
@@ -670,8 +754,9 @@ function updateDelayGraph(currentDelay) {
         container.style.display = 'block';
     }
 
-    // Add current delay to history
-    delayHistory.push(currentDelay);
+    // Add current delay to history (ensure it's a valid number)
+    const delay = parseFloat(currentDelay) || 0;
+    delayHistory.push(delay);
 
     // Keep only last 60 data points
     if (delayHistory.length > MAX_HISTORY) {
@@ -679,7 +764,7 @@ function updateDelayGraph(currentDelay) {
     }
 
     // Update current delay display
-    document.getElementById('graph-current-delay').textContent = `${currentDelay.toFixed(1)}s`;
+    document.getElementById('graph-current-delay').textContent = `${delay.toFixed(1)}s`;
 
     // Draw graph
     const canvas = document.getElementById('delay-graph');
@@ -695,8 +780,12 @@ function updateDelayGraph(currentDelay) {
     // Don't draw if no data
     if (delayHistory.length < 2) return;
 
+    // Filter out invalid values for calculating scale
+    const validDelays = delayHistory.filter(d => !isNaN(d) && d !== null && d !== undefined);
+    if (validDelays.length === 0) return;
+
     // Calculate scale
-    const maxDelay = Math.max(...delayHistory, 1); // Minimum scale of 1 second
+    const maxDelay = Math.max(...validDelays, 1); // Minimum scale of 1 second
     const minDelay = 0;
 
     // Update Y-axis labels

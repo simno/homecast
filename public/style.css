@@ -394,6 +394,69 @@ select:focus {
     to { transform: rotate(360deg); }
 }
 
+/* Connection Health Indicator */
+.connection-health {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+}
+
+.health-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9em;
+}
+
+.health-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px currentColor;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.health-dot.healthy {
+    background: var(--success);
+    color: var(--success);
+}
+
+.health-dot.degraded {
+    background: var(--warning);
+    color: var(--warning);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.health-dot.unhealthy {
+    background: var(--danger);
+    color: var(--danger);
+    animation: pulse 0.5s ease-in-out infinite;
+}
+
+.health-dot.reconnecting {
+    background: var(--warning);
+    color: var(--warning);
+    animation: blink 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
+.health-text {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
 .status-bar {
     text-align: center;
     padding: 0;

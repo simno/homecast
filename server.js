@@ -143,6 +143,10 @@ const streamStats = new Map();
 // Key: deviceIp -> { playbackStartTime, playbackStartPosition, lastDelay }
 const playbackTracking = new Map();
 
+// Buffer health tracking
+// Key: deviceIp -> { bufferingEvents, totalBufferingTime, lastBufferStart, lastState, sessionStartTime }
+const bufferHealthTracking = new Map();
+
 // --- Discovery ---
 const devices = {};
 const deviceLastSeen = new Map(); // Track when devices were last seen for staleness detection
@@ -171,6 +175,14 @@ const browser = mdns.createBrowser(mdns.tcp('googlecast'));
 
 // Active cast sessions (IP -> { client, player })
 const activeSessions = new Map();
+
+// Connection health monitoring
+// Key: deviceIp -> { lastHeartbeat, missedHeartbeats, connectionState, reconnectAttempts }
+const connectionHealth = new Map();
+const HEARTBEAT_INTERVAL = 5000; // Check every 5 seconds
+const MAX_MISSED_HEARTBEATS = 3; // Mark as unhealthy after 3 missed (15 seconds)
+const RECONNECT_DELAY = 10000; // Wait 10 seconds before reconnect attempt
+const MAX_RECONNECT_ATTEMPTS = 3; // Try reconnecting 3 times
 
 // Map device IPs to their streaming client IPs (for stats tracking)
 // Key: chromecastIp -> clientIp (the IP making proxy requests)
@@ -878,6 +890,213 @@ function resolveM3u8Url(line, baseUrl) {
     }
 }
 
+// --- Connection Health Monitoring ---
+function initializeConnectionHealth(deviceIp) {
+    connectionHealth.set(deviceIp, {
+        lastHeartbeat: Date.now(),
+        missedHeartbeats: 0,
+        connectionState: 'healthy', // healthy, degraded, unhealthy, reconnecting
+        reconnectAttempts: 0,
+        lastActivity: Date.now()
+    });
+    console.log(`[Health] Initialized monitoring for ${deviceIp}`);
+
+    // Broadcast initial healthy state
+    broadcast({
+        type: 'connectionHealth',
+        deviceIp,
+        state: 'healthy',
+        message: 'Connected'
+    });
+}
+
+function updateHeartbeat(deviceIp) {
+    const health = connectionHealth.get(deviceIp);
+    if (health) {
+        health.lastHeartbeat = Date.now();
+        health.lastActivity = Date.now();
+        health.missedHeartbeats = 0;
+        if (health.connectionState !== 'healthy') {
+            health.connectionState = 'healthy';
+            health.reconnectAttempts = 0;
+            console.log(`[Health] Connection restored for ${deviceIp}`);
+            broadcast({
+                type: 'connectionHealth',
+                deviceIp,
+                state: 'healthy',
+                message: 'Connection restored'
+            });
+        }
+    }
+}
+
+function checkConnectionHealth() {
+    const now = Date.now();
+
+    for (const [deviceIp, health] of connectionHealth.entries()) {
+        const timeSinceLastHeartbeat = now - health.lastHeartbeat;
+        const session = activeSessions.get(deviceIp);
+
+        if (!session) {
+            // No active session, clean up health monitoring
+            connectionHealth.delete(deviceIp);
+            continue;
+        }
+
+        // Check if we've missed heartbeats
+        if (timeSinceLastHeartbeat > HEARTBEAT_INTERVAL) {
+            health.missedHeartbeats = Math.floor(timeSinceLastHeartbeat / HEARTBEAT_INTERVAL);
+
+            if (health.missedHeartbeats >= MAX_MISSED_HEARTBEATS) {
+                // Connection is unhealthy
+                if (health.connectionState !== 'unhealthy' && health.connectionState !== 'reconnecting') {
+                    health.connectionState = 'unhealthy';
+                    console.warn(`[Health] Connection unhealthy for ${deviceIp} (${health.missedHeartbeats} missed heartbeats)`);
+                    broadcast({
+                        type: 'connectionHealth',
+                        deviceIp,
+                        state: 'unhealthy',
+                        message: `No response for ${Math.round(timeSinceLastHeartbeat / 1000)}s`,
+                        missedHeartbeats: health.missedHeartbeats
+                    });
+
+                    // Attempt reconnection if not already trying
+                    if (health.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        setTimeout(() => attemptReconnect(deviceIp), RECONNECT_DELAY);
+                    }
+                }
+            } else if (health.missedHeartbeats >= 2) {
+                // Connection is degraded
+                if (health.connectionState === 'healthy') {
+                    health.connectionState = 'degraded';
+                    console.log(`[Health] Connection degraded for ${deviceIp}`);
+                    broadcast({
+                        type: 'connectionHealth',
+                        deviceIp,
+                        state: 'degraded',
+                        message: 'Connection may be unstable'
+                    });
+                }
+            }
+        }
+    }
+}
+
+async function attemptReconnect(deviceIp) {
+    const health = connectionHealth.get(deviceIp);
+    if (!health || health.connectionState === 'healthy') return;
+
+    health.reconnectAttempts++;
+    health.connectionState = 'reconnecting';
+
+    console.log(`[Health] Attempting reconnection for ${deviceIp} (attempt ${health.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+    broadcast({
+        type: 'connectionHealth',
+        deviceIp,
+        state: 'reconnecting',
+        message: `Reconnecting... (${health.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`,
+        attempt: health.reconnectAttempts
+    });
+
+    // Try to ping the Chromecast client
+    try {
+        const session = activeSessions.get(deviceIp);
+        if (session && session.player) {
+            // Request player status to test connection
+            session.player.getStatus((err, status) => {
+                if (!err && status) {
+                    // Connection restored
+                    console.log(`[Health] Reconnection successful for ${deviceIp}`);
+                    updateHeartbeat(deviceIp);
+                } else {
+                    // Still failed
+                    console.warn(`[Health] Reconnection failed for ${deviceIp}: ${err?.message || 'No status'}`);
+                    if (health.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                        console.error(`[Health] Max reconnection attempts reached for ${deviceIp}, giving up`);
+                        broadcast({
+                            type: 'connectionHealth',
+                            deviceIp,
+                            state: 'failed',
+                            message: 'Connection lost. Please restart casting.'
+                        });
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error(`[Health] Reconnection error for ${deviceIp}:`, error.message);
+    }
+}
+
+// Start health monitoring interval
+setInterval(checkConnectionHealth, HEARTBEAT_INTERVAL);
+console.log('[Health] Connection monitoring started');
+
+// --- Buffer Health Tracking ---
+function trackBufferHealth(deviceIp, playerState) {
+    let tracking = bufferHealthTracking.get(deviceIp);
+
+    // Initialize tracking on first status update
+    if (!tracking) {
+        tracking = {
+            bufferingEvents: 0,
+            totalBufferingTime: 0,
+            lastBufferStart: null,
+            lastState: null,
+            sessionStartTime: Date.now()
+        };
+        bufferHealthTracking.set(deviceIp, tracking);
+    }
+
+    const now = Date.now();
+
+    // Detect state transitions
+    if (playerState === 'BUFFERING' && tracking.lastState !== 'BUFFERING') {
+        // Started buffering
+        tracking.bufferingEvents++;
+        tracking.lastBufferStart = now;
+        console.log(`[BufferHealth] ${deviceIp} - Buffering started (event #${tracking.bufferingEvents})`);
+    } else if (tracking.lastState === 'BUFFERING' && playerState !== 'BUFFERING') {
+        // Stopped buffering
+        if (tracking.lastBufferStart) {
+            const bufferingDuration = (now - tracking.lastBufferStart) / 1000; // seconds
+            tracking.totalBufferingTime += bufferingDuration;
+            console.log(`[BufferHealth] ${deviceIp} - Buffering ended (duration: ${bufferingDuration.toFixed(1)}s, total: ${tracking.totalBufferingTime.toFixed(1)}s)`);
+            tracking.lastBufferStart = null;
+        }
+    }
+
+    tracking.lastState = playerState;
+}
+
+function getBufferHealthStats(deviceIp) {
+    const tracking = bufferHealthTracking.get(deviceIp);
+    if (!tracking) {
+        return {
+            healthScore: 100,
+            bufferingEvents: 0,
+            totalBufferingTime: 0
+        };
+    }
+
+    // Calculate current buffering time if currently buffering
+    let currentBufferingTime = tracking.totalBufferingTime;
+    if (tracking.lastBufferStart) {
+        currentBufferingTime += (Date.now() - tracking.lastBufferStart) / 1000;
+    }
+
+    // Calculate health score: (playingTime / totalTime) * 100
+    const totalSessionTime = (Date.now() - tracking.sessionStartTime) / 1000; // seconds
+    const playingTime = totalSessionTime - currentBufferingTime;
+    const healthScore = totalSessionTime > 0 ? Math.round((playingTime / totalSessionTime) * 100) : 100;
+
+    return {
+        healthScore: Math.max(0, Math.min(100, healthScore)), // Clamp to 0-100
+        bufferingEvents: tracking.bufferingEvents,
+        totalBufferingTime: Math.round(currentBufferingTime)
+    };
+}
+
 // --- API: Proxy Stream ---
 app.get('/proxy', proxyLimiter, async (req, res) => {
     const { url, referer } = req.query;
@@ -908,6 +1127,9 @@ app.get('/proxy', proxyLimiter, async (req, res) => {
         deviceIp = clientIp;
         console.log(`[Proxy] No device mapping found for ${clientIp}, using as device IP`);
     }
+
+    // Update connection heartbeat (device is making requests = healthy)
+    updateHeartbeat(deviceIp);
 
     // Initialize or get stream stats for this device
     if (!streamStats.has(deviceIp)) {
@@ -1425,14 +1647,23 @@ app.post('/api/cast', (req, res) => {
                 // Store active session for stop functionality
                 activeSessions.set(ip, { client, player });
 
+                // Initialize connection health monitoring
+                initializeConnectionHealth(ip);
+
                 // Monitor status
                 player.on('status', (status) => {
                     console.log('[Cast] Player Status Update:', status.playerState);
+
+                    // Update heartbeat on every status update
+                    updateHeartbeat(ip);
 
                     // DEBUG: Log full status object once to see what's available
                     if (!playbackTracking.has(ip)) {
                         console.log('[Cast] Full status object:', JSON.stringify(status, null, 2));
                     }
+
+                    // Track buffer health
+                    trackBufferHealth(ip, status.playerState);
 
                     // Calculate delay only if liveSeekableRange is available
                     let delay = 0;
@@ -1448,11 +1679,15 @@ app.post('/api/cast', (req, res) => {
                         playbackTracking.set(ip, tracking);
                     }
 
+                    // Get buffer health stats
+                    const bufferHealth = getBufferHealthStats(ip);
+
                     broadcast({
                         type: 'playerStatus',
                         deviceIp: ip, // Include device IP so frontend can filter
                         status,
-                        delay
+                        delay,
+                        bufferHealth
                     });
                 });
 
@@ -1461,7 +1696,9 @@ app.post('/api/cast', (req, res) => {
                     console.log('[Cast] Player closed for', ip);
                     activeSessions.delete(ip);
                     playbackTracking.delete(ip);
+                    bufferHealthTracking.delete(ip);
                     deviceToClientMap.delete(ip);
+                    connectionHealth.delete(ip);
 
                     // Clear stream statistics for this device
                     streamStats.delete(ip);
@@ -1535,7 +1772,9 @@ app.post('/api/stop', (req, res) => {
             client.close();
             activeSessions.delete(ip);
             playbackTracking.delete(ip);
+            bufferHealthTracking.delete(ip);
             deviceToClientMap.delete(ip);
+            connectionHealth.delete(ip);
 
             // Clear stream statistics for this device
             streamStats.delete(ip);
