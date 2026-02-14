@@ -160,32 +160,31 @@ const cacheEdgeCases = [
     },
     {
         name: 'Cache at exact expiration boundary (live)',
-        getTimestamp: () => Date.now() - 4000,
+        age: 4000,
         isLive: true,
         expectedValid: false // Exactly at TTL = expired
     },
     {
         name: 'Cache 1ms before expiration (live)',
-        getTimestamp: () => Date.now() - 3999,
+        age: 3999,
         isLive: true,
         expectedValid: true
     },
     {
         name: 'Cache 1ms after expiration (live)',
-        getTimestamp: () => Date.now() - 4001,
+        age: 4001,
         isLive: true,
         expectedValid: false
     }
 ];
 
-cacheEdgeCases.forEach(({ name, getTimestamp, isLive, expectedValid }, index) => {
+cacheEdgeCases.forEach(({ name, getTimestamp, age: fixedAge, isLive, expectedValid }, index) => {
     try {
         const CACHE_TTL_VOD = 60000;
         const CACHE_TTL_LIVE = 4000;
         const cacheTTL = isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
-        const timestamp = getTimestamp(); // Calculate timestamp at test time
-        const now = Date.now();
-        const age = now - timestamp;
+        // Use fixed age if provided (avoids timing flakiness), otherwise compute from timestamp
+        const age = fixedAge !== undefined ? fixedAge : Date.now() - getTimestamp();
         const isValid = (age < cacheTTL);
 
         if (isValid !== expectedValid) {

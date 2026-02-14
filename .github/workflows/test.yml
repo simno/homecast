@@ -15,8 +15,8 @@ jobs:
     
     strategy:
       matrix:
-        node-version: [24.x]  # Test on Node 24 as required by engines
-    
+        node-version: [25.x]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
