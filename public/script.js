@@ -16,13 +16,6 @@ let _isCasting = false;
 let availableStreams = []; // Store all found streams
 let csrfToken = null;
 
-// Sanitize text for defense-in-depth (all dynamic content should use textContent, but this is an extra guard)
-function sanitizeText(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
 // Fetch CSRF token on load
 async function fetchCsrfToken() {
     try {
@@ -938,11 +931,6 @@ function updateDelayGraph(currentDelay) {
     ctx.closePath();
     ctx.fillStyle = 'rgba(248, 113, 113, 0.15)';
     ctx.fill();
-}
-
-// Help modal functions
-function showHelp() {
-    document.getElementById('help-modal').classList.remove('hidden');
 }
 
 function closeHelp() {

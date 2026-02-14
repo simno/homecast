@@ -49,10 +49,10 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'"],
             connectSrc: ["'self'", 'ws:', 'wss:'],
             imgSrc: ["'self'", 'data:'],
-            frameAncestors: ["'none'"],
-        },
+            frameAncestors: ["'none'"]
+        }
     },
-    crossOriginEmbedderPolicy: false,
+    crossOriginEmbedderPolicy: false
 }));
 
 // Skip CSP for /proxy route (Chromecast needs Access-Control-Allow-Origin: *)
@@ -80,9 +80,9 @@ if (CSRF_ENABLED) {
             sameSite: 'strict',
             path: '/',
             secure: false, // Allow HTTP for local network usage
-            httpOnly: true,
+            httpOnly: true
         },
-        getCsrfTokenFromRequest: (req) => req.headers['x-csrf-token'],
+        getCsrfTokenFromRequest: (req) => req.headers['x-csrf-token']
     });
 
     // Endpoint to get CSRF token

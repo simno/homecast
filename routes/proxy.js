@@ -5,13 +5,13 @@ const {
     playlistCache,
     streamStats,
     playbackTracking,
-    deviceToClientMap,
+    deviceToClientMap
 } = require('../lib/state');
 const {
     httpAgent,
     httpsAgent,
     CACHE_TTL_VOD,
-    CACHE_TTL_LIVE,
+    CACHE_TTL_LIVE
 } = require('../lib/utils');
 const { validateProxyUrl } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
