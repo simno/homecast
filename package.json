@@ -1,6 +1,6 @@
 {
   "name": "homecast",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Self-hosted Chromecast streaming for your home network",
   "main": "server.js",
   "scripts": {
