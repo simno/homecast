@@ -49,10 +49,12 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'"],
             connectSrc: ["'self'", 'ws:', 'wss:'],
             imgSrc: ["'self'", 'data:'],
-            frameAncestors: ["'none'"]
+            frameAncestors: ["'none'"],
+            upgradeInsecureRequests: null // Disable: HomeCast serves over HTTP on local network
         }
     },
-    crossOriginEmbedderPolicy: false
+    crossOriginEmbedderPolicy: false,
+    strictTransportSecurity: false // Disable HSTS: no TLS on local network
 }));
 
 // Skip CSP for /proxy route (Chromecast needs Access-Control-Allow-Origin: *)
