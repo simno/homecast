@@ -14,6 +14,29 @@ let currentReferer = '';
 let currentDeviceIp = null;
 let _isCasting = false;
 let availableStreams = []; // Store all found streams
+let csrfToken = null;
+
+// Sanitize text for defense-in-depth (all dynamic content should use textContent, but this is an extra guard)
+function sanitizeText(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// Fetch CSRF token on load
+async function fetchCsrfToken() {
+    try {
+        const res = await fetch('/api/csrf-token');
+        if (res.ok) {
+            const data = await res.json();
+            csrfToken = data.token;
+            console.log('[CSRF] Token acquired');
+        }
+    } catch {
+        console.log('[CSRF] Token endpoint not available (CSRF may be disabled)');
+    }
+}
+fetchCsrfToken();
 
 // Transfer rate history for graph (last 60 data points = 60 seconds)
 const rateHistory = [];
@@ -81,10 +104,10 @@ function restoreSessionUI(deviceIp, sessionData) {
     _isCasting = true;
 
     // Update UI to show active session
-    document.getElementById('cast-btn').style.display = 'none';
-    document.getElementById('stop-btn').style.display = 'inline-flex';
-    document.getElementById('stream-stats-card').style.display = 'block';
-    statusCard.style.display = 'block';
+    castBtn.classList.add('hidden');
+    stopBtn.classList.remove('hidden');
+    document.getElementById('stream-stats-card').classList.remove('hidden');
+    statusCard.classList.remove('hidden');
 
     // If we have current stats, display them immediately
     if (sessionData && sessionData.stats) {
@@ -145,22 +168,22 @@ ws.onmessage = (event) => {
             message = '🎬 Now Playing';
             type = 'success';
             // Show stats card when playing
-            document.getElementById('stream-stats-card').style.display = 'block';
+            document.getElementById('stream-stats-card').classList.remove('hidden');
             // Show stop button
-            document.getElementById('stop-btn').style.display = 'inline-flex';
-            document.getElementById('cast-btn').style.display = 'none';
+            stopBtn.classList.remove('hidden');
+            castBtn.classList.add('hidden');
         } else if (state === 'BUFFERING') {
             message = '⏳ Buffering...';
             type = 'loading';
             // Show stop button while buffering
-            document.getElementById('stop-btn').style.display = 'inline-flex';
-            document.getElementById('cast-btn').style.display = 'none';
+            stopBtn.classList.remove('hidden');
+            castBtn.classList.add('hidden');
         } else if (state === 'PAUSED') {
             message = '⏸ Paused';
             type = 'info';
             // Show stop button when paused
-            document.getElementById('stop-btn').style.display = 'inline-flex';
-            document.getElementById('cast-btn').style.display = 'none';
+            stopBtn.classList.remove('hidden');
+            castBtn.classList.add('hidden');
         } else if (state === 'IDLE') {
             // Check if it's an error or normal stop
             if (idleReason === 'ERROR') {
@@ -171,12 +194,12 @@ ws.onmessage = (event) => {
                 type = 'info';
             }
             // Hide stats card and clear graph when stopped/error
-            document.getElementById('stream-stats-card').style.display = 'none';
+            document.getElementById('stream-stats-card').classList.add('hidden');
             rateHistory.length = 0; // Clear history
             delayHistory.length = 0; // Clear delay history
             // Show cast button, hide stop button
-            document.getElementById('cast-btn').style.display = 'inline-flex';
-            document.getElementById('stop-btn').style.display = 'none';
+            castBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
 
             // Clear state when playback ends
             _isCasting = false;
@@ -222,13 +245,13 @@ deviceSelect.addEventListener('change', async function () {
         _isCasting = false;
 
         // Reset buttons
-        document.getElementById('cast-btn').style.display = 'inline-flex';
-        document.getElementById('cast-btn').disabled = true; // Disabled until stream selected
-        document.getElementById('stop-btn').style.display = 'none';
+        castBtn.classList.remove('hidden');
+        castBtn.disabled = true; // Disabled until stream selected
+        stopBtn.classList.add('hidden');
 
         // Hide status and stats
-        statusCard.style.display = 'none';
-        document.getElementById('stream-stats-card').style.display = 'none';
+        statusCard.classList.add('hidden');
+        document.getElementById('stream-stats-card').classList.add('hidden');
 
         // Clear stats display
         resetStreamStats();
@@ -290,7 +313,11 @@ window.addEventListener('load', async () => {
 function toggleManualInput() {
     const isManual = deviceSelect.value === 'manual';
     console.log('[ManualIP] Toggle called, value:', deviceSelect.value, 'isManual:', isManual);
-    manualIpContainer.style.display = isManual ? 'block' : 'none';
+    if (isManual) {
+        manualIpContainer.classList.remove('hidden');
+    } else {
+        manualIpContainer.classList.add('hidden');
+    }
     if (isManual && document.activeElement !== manualIpInput) {
         manualIpInput.focus();
     }
@@ -327,8 +354,7 @@ function updateDeviceList(devices) {
     toggleManualInput();
 }
 
-// Expose to global scope for HTML onclick handlers
-window.fetchAndAnalyze = async function () {
+async function fetchAndAnalyze() {
     const url = document.getElementById('video-url').value.trim();
     if (!url) {
         alert('Please enter a URL first');
@@ -336,12 +362,14 @@ window.fetchAndAnalyze = async function () {
     }
 
     updateStatus('🔍 Analyzing URL...', 'loading');
-    statusCard.style.display = 'block';
+    statusCard.classList.remove('hidden');
 
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
         const res = await fetch('/api/extract', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ url })
         });
 
@@ -365,7 +393,7 @@ function displayStreamOptions(videos) {
     streamOptionsContainer.innerHTML = '';
     document.getElementById('streams-found-text').textContent =
         videos.length > 1 ? `${videos.length} streams found:` : 'Video found:';
-    document.getElementById('resolved-url-container').style.display = 'flex';
+    document.getElementById('resolved-url-container').classList.remove('hidden');
 
     videos.forEach((video, index) => {
         const option = document.createElement('div');
@@ -389,9 +417,7 @@ function displayStreamOptions(videos) {
         urlSpan.textContent = video.url;
 
         const badgesContainer = document.createElement('div');
-        badgesContainer.style.marginTop = '4px';
-        badgesContainer.style.display = 'flex';
-        badgesContainer.style.gap = '6px';
+        badgesContainer.className = 'stream-option-badges';
 
         const typeSpan = document.createElement('span');
         typeSpan.className = `stream-option-type ${video.type}`;
@@ -434,8 +460,7 @@ function checkReady() {
     castBtn.disabled = !(ip && selectedStream);
 }
 
-// Expose to global scope for HTML onclick handlers
-window.startCasting = async function () {
+async function startCasting() {
     const ip = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
     const selectedRadio = document.querySelector('input[name="stream-select"]:checked');
 
@@ -452,9 +477,11 @@ window.startCasting = async function () {
     updateStatus('📡 Connecting to Chromecast...', 'loading');
 
     try {
+        const castHeaders = { 'Content-Type': 'application/json' };
+        if (csrfToken) castHeaders['X-CSRF-Token'] = csrfToken;
         const res = await fetch('/api/cast', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: castHeaders,
             body: JSON.stringify({ ip, url, proxy, referer: currentReferer })
         });
 
@@ -472,8 +499,8 @@ window.startCasting = async function () {
             updateStatus('✅ Casting started!', 'success');
             currentDeviceIp = ip;
             _isCasting = true;
-            castBtn.style.display = 'none';
-            stopBtn.style.display = 'block';
+            castBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
 
             // Save state for persistence
             saveState(ip);
@@ -485,8 +512,7 @@ window.startCasting = async function () {
     }
 };
 
-// Expose stop function to global scope
-window.stopCasting = async function () {
+async function stopCasting() {
     if (!currentDeviceIp) {
         updateStatus('No active casting session', 'error');
         return;
@@ -496,9 +522,11 @@ window.stopCasting = async function () {
     updateStatus('Stopping playback...', 'loading');
 
     try {
+        const stopHeaders = { 'Content-Type': 'application/json' };
+        if (csrfToken) stopHeaders['X-CSRF-Token'] = csrfToken;
         const response = await fetch('/api/stop', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: stopHeaders,
             body: JSON.stringify({ ip: currentDeviceIp })
         });
 
@@ -508,9 +536,9 @@ window.stopCasting = async function () {
             updateStatus('⏹️ Playback stopped', 'success');
             _isCasting = false;
             currentDeviceIp = null;
-            castBtn.style.display = 'block';
+            castBtn.classList.remove('hidden');
             castBtn.disabled = false;
-            stopBtn.style.display = 'none';
+            stopBtn.classList.add('hidden');
             stopBtn.disabled = false;
 
             // Clear saved state
@@ -529,17 +557,17 @@ function updateStatus(message, type = 'info') {
     statusText.innerText = message;
 
     // Hide all icons
-    statusSpinner.style.display = 'none';
-    statusSuccess.style.display = 'none';
-    statusError.style.display = 'none';
+    statusSpinner.classList.add('hidden');
+    statusSuccess.classList.add('hidden');
+    statusError.classList.add('hidden');
 
     // Show appropriate icon
     if (type === 'loading') {
-        statusSpinner.style.display = 'block';
+        statusSpinner.classList.remove('hidden');
     } else if (type === 'success') {
-        statusSuccess.style.display = 'block';
+        statusSuccess.classList.remove('hidden');
     } else if (type === 'error') {
-        statusError.style.display = 'block';
+        statusError.classList.remove('hidden');
     }
 }
 
@@ -634,11 +662,11 @@ function updateBufferHealth(bufferHealth) {
 
         // Color code based on health score
         if (healthScore >= 95) {
-            healthEl.style.color = '#00aa00'; // Green
+            healthEl.style.color = '#34d399'; // Green
         } else if (healthScore >= 85) {
-            healthEl.style.color = '#ff9900'; // Orange
+            healthEl.style.color = '#fbbf24'; // Warning
         } else {
-            healthEl.style.color = '#cc0000'; // Red
+            healthEl.style.color = '#f87171'; // Red
         }
     }
 }
@@ -653,7 +681,7 @@ function resetStreamStats() {
     document.getElementById('stat-duration').textContent = '0s';
     document.getElementById('stat-cache').textContent = '0';
     document.getElementById('stat-buffer-health').textContent = '-';
-    document.getElementById('stat-buffer-health').style.color = '#0066cc';
+    document.getElementById('stat-buffer-health').style.color = '#60a5fa';
 }
 
 function updateConnectionHealth(state, message) {
@@ -665,7 +693,7 @@ function updateConnectionHealth(state, message) {
     // Show health indicator when we have a state (connection monitoring is active)
     if (state) {
         console.log('[ConnectionHealth] Showing health indicator');
-        healthContainer.style.display = 'block';
+        healthContainer.classList.remove('hidden');
 
         // Remove all state classes
         healthDot.className = 'health-dot';
@@ -689,7 +717,7 @@ function updateConnectionHealth(state, message) {
             updateStatus('🎬 Streaming', 'success');
         }
     } else {
-        healthContainer.style.display = 'none';
+        healthContainer.classList.add('hidden');
     }
 }
 
@@ -723,6 +751,9 @@ function updateRateGraph(currentRate) {
     // Draw graph
     const canvas = document.getElementById('rate-graph');
     if (!canvas) return;
+
+    // Sync canvas drawing buffer to displayed size
+    canvas.width = canvas.clientWidth;
 
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
@@ -769,7 +800,7 @@ function updateRateGraph(currentRate) {
     const startX = width - padding - ((dataPoints - 1) * xStep);
 
     // Draw grid lines
-    ctx.strokeStyle = '#e0e0e0';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
         const y = padding + (graphHeight * i / 4);
@@ -780,7 +811,7 @@ function updateRateGraph(currentRate) {
     }
 
     // Draw the line graph (oldest to newest, ending at right edge)
-    ctx.strokeStyle = '#0066cc';
+    ctx.strokeStyle = '#60a5fa';
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -802,7 +833,7 @@ function updateRateGraph(currentRate) {
     ctx.lineTo(lastX, height - padding);
     ctx.lineTo(startX, height - padding);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 102, 204, 0.1)';
+    ctx.fillStyle = 'rgba(96, 165, 250, 0.15)';
     ctx.fill();
 }
 
@@ -810,7 +841,7 @@ function updateDelayGraph(currentDelay) {
     // Show the delay graph container
     const container = document.getElementById('delay-graph-container');
     if (container) {
-        container.style.display = 'block';
+        container.classList.remove('hidden');
     }
 
     // Add current delay to history (ensure it's a valid number)
@@ -828,6 +859,9 @@ function updateDelayGraph(currentDelay) {
     // Draw graph
     const canvas = document.getElementById('delay-graph');
     if (!canvas) return;
+
+    // Sync canvas drawing buffer to displayed size
+    canvas.width = canvas.clientWidth;
 
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
@@ -869,7 +903,7 @@ function updateDelayGraph(currentDelay) {
     const startX = width - padding - ((dataPoints - 1) * xStep);
 
     // Draw grid lines
-    ctx.strokeStyle = '#e0e0e0';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i++) {
         const y = padding + (graphHeight * i / 4);
@@ -880,7 +914,7 @@ function updateDelayGraph(currentDelay) {
     }
 
     // Draw the line graph (oldest to newest, ending at right edge)
-    ctx.strokeStyle = '#dc2626';
+    ctx.strokeStyle = '#f87171';
     ctx.lineWidth = 2;
     ctx.beginPath();
 
@@ -902,23 +936,27 @@ function updateDelayGraph(currentDelay) {
     ctx.lineTo(lastX, height - padding);
     ctx.lineTo(startX, height - padding);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(220, 38, 38, 0.1)';
+    ctx.fillStyle = 'rgba(248, 113, 113, 0.15)';
     ctx.fill();
 }
 
-// Help modal functions - exposed to window for HTML onclick handlers
-window.showHelp = function () {
-    document.getElementById('help-modal').style.display = 'flex';
-};
+// Help modal functions
+function showHelp() {
+    document.getElementById('help-modal').classList.remove('hidden');
+}
 
-window.closeHelp = function () {
-    document.getElementById('help-modal').style.display = 'none';
-};
+function closeHelp() {
+    document.getElementById('help-modal').classList.add('hidden');
+}
 
-// Close modal on outside click
+// Wire up event listeners (replaces inline onclick handlers)
+document.getElementById('analyze-btn').addEventListener('click', fetchAndAnalyze);
+castBtn.addEventListener('click', startCasting);
+stopBtn.addEventListener('click', stopCasting);
+document.getElementById('help-close-btn')?.addEventListener('click', closeHelp);
 document.getElementById('help-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'help-modal') {
-        window.closeHelp();
+        closeHelp();
     }
 });
 

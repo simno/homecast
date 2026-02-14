@@ -10,7 +10,7 @@ const performanceTests = [
     {
         name: 'Resolve 1000 URLs quickly',
         operation: () => {
-            const { resolveM3u8Url } = require('../server.js');
+            const { resolveM3u8Url } = require('../lib/proxy');
             const baseUrl = new URL('https://cdn.example.com/videos/stream.m3u8');
 
             const start = Date.now();

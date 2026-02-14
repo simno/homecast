@@ -1,4 +1,4 @@
-FROM node:24-alpine
+FROM node:25-alpine
 
 # Set working directory
 WORKDIR /app
@@ -9,6 +9,8 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy application files
 COPY server.js ./
+COPY lib ./lib
+COPY routes ./routes
 COPY public ./public
 
 # Create non-root user

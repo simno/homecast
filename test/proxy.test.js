@@ -1,4 +1,4 @@
-const { resolveM3u8Url } = require('../server.js');
+const { resolveM3u8Url } = require('../lib/proxy');
 
 console.log('Running M3U8 URL Resolution Tests...\n');
 

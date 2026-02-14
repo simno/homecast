@@ -112,8 +112,8 @@ docker run -d --name homecast --network host homecast:local
 ### Node.js
 
 ```bash
-# Requires Node.js 24 or higher
-node --version  # Should be v24.x or higher
+# Requires Node.js 25 or higher
+node --version  # Should be v25.x or higher
 
 # Install
 npm install

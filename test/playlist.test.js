@@ -7,7 +7,7 @@ let failed = 0;
 
 // Simulate the playlist rewriting logic from server.js lines 334-344
 function rewritePlaylist(originalM3u8, baseUrl, proxyHost) {
-    const { resolveM3u8Url } = require('../server.js');
+    const { resolveM3u8Url } = require('../lib/proxy');
     const parsedBaseUrl = new URL(baseUrl);
 
     return originalM3u8.split('\n').map(line => {

@@ -6,17 +6,17 @@
     <title>HomeCast - Stream to Chromecast</title>
     <link rel="stylesheet" href="style.css">
     <meta name="description" content="Self-hosted streaming to your Chromecast devices">
-    
+
     <!-- Favicons -->
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
     <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-    
+
     <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#06b6d4">
+    <meta name="theme-color" content="#60a5fa">
 </head>
 <body>
     <div class="container">
@@ -25,7 +25,7 @@
                 <svg class="logo" width="40" height="40" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <!-- TV/Monitor Screen -->
                     <rect x="6" y="6" width="36" height="24" rx="2" stroke="currentColor" stroke-width="2.5"/>
-                    
+
                     <!-- Cast waves (proper arcs) -->
                     <path d="M6 38 A16 16 0 0 1 22 38" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
                     <path d="M6 42 A12 12 0 0 1 18 42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
@@ -35,38 +35,38 @@
             </h1>
             <p class="subtitle">Stream a video to your Chromecast</p>
         </header>
-        
-        <div class="card">
+
+        <div class="card fade-in-up" style="animation-delay: 0.05s">
             <div class="card-header">
                 <span class="step-number">1</span>
                 <h3>Select Device</h3>
             </div>
-            <select id="device-select">
+            <select id="device-select" aria-label="Select Device">
                 <option value="" disabled selected>Scanning for devices...</option>
                 <option value="manual">Enter IP Manually...</option>
             </select>
-            
-            <div id="manual-ip-container" class="manual-ip-box" style="display: none;">
+
+            <div id="manual-ip-container" class="manual-ip-box hidden">
                 <label for="manual-ip">Device IP Address:</label>
                 <input type="text" id="manual-ip" placeholder="e.g., 192.168.1.50">
             </div>
         </div>
 
-        <div class="card">
+        <div class="card fade-in-up" style="animation-delay: 0.1s">
             <div class="card-header">
                 <span class="step-number">2</span>
                 <h3>Video Source</h3>
             </div>
             <div class="input-group">
-                <input type="text" id="video-url" placeholder="https://example.com/video.mp4 or webpage URL">
-                <button onclick="fetchAndAnalyze()" class="btn-secondary">
+                <input type="text" id="video-url" aria-label="Video URL" placeholder="https://example.com/video.mp4 or webpage URL">
+                <button id="analyze-btn" class="btn-secondary">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                     </svg>
                     Analyze
                 </button>
             </div>
-            <div id="resolved-url-container" class="resolved-url" style="display:none;">
+            <div id="resolved-url-container" class="resolved-url hidden">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
@@ -90,19 +90,19 @@
             </label>
         </div>
 
-        <div class="card">
+        <div class="card fade-in-up" style="animation-delay: 0.15s">
             <div class="card-header">
                 <span class="step-number">3</span>
                 <h3>Cast</h3>
             </div>
-            <button onclick="startCasting()" id="cast-btn" class="btn-primary" disabled>
+            <button id="cast-btn" class="btn-primary" disabled>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
                     <polyline points="17 2 12 7 7 2"/>
                 </svg>
                 Start Casting
             </button>
-            <button onclick="stopCasting()" id="stop-btn" class="btn-danger" style="display: none;">
+            <button id="stop-btn" class="btn-danger hidden">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="6" y="6" width="12" height="12"/>
                 </svg>
@@ -110,24 +110,24 @@
             </button>
 
             <!-- Connection Health Indicator -->
-            <div class="connection-health" id="connection-health" style="display: none;">
+            <div class="connection-health hidden" id="connection-health">
                 <div class="health-indicator">
                     <span class="health-dot" id="health-dot"></span>
                     <span class="health-text" id="health-text">Connected</span>
                 </div>
             </div>
 
-            <div class="status-card" id="status-card" style="display:none; margin-top: 16px;">
+            <div class="status-card hidden" id="status-card">
                 <div class="status-icon">
-                    <svg id="status-spinner" class="spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <svg id="status-spinner" class="spinner hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10" opacity="0.25"/>
                         <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
                     </svg>
-                    <svg id="status-success" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <svg id="status-success" class="hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/>
                         <polyline points="9 12 11 14 15 10"/>
                     </svg>
-                    <svg id="status-error" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                    <svg id="status-error" class="hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/>
                         <line x1="15" y1="9" x2="9" y2="15"/>
                         <line x1="9" y1="9" x2="15" y2="15"/>
@@ -138,70 +138,70 @@
         </div>
 
         <!-- Stream Stats Card -->
-        <div class="card" id="stream-stats-card" style="display:none;">
-            <h3 style="margin-top: 0; margin-bottom: 16px;">📊 Stream Statistics</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px;">
+        <div class="card hidden" id="stream-stats-card">
+            <h3 class="stats-title">Stream Statistics</h3>
+            <div class="stats-grid">
                 <div>
                     <strong>Resolution:</strong>
-                    <div id="stat-resolution" style="color: #0066cc;">Unknown</div>
+                    <div id="stat-resolution" class="stat-value">Unknown</div>
                 </div>
                 <div>
                     <strong>Frame Rate:</strong>
-                    <div id="stat-framerate" style="color: #0066cc;">-</div>
+                    <div id="stat-framerate" class="stat-value">-</div>
                 </div>
                 <div>
                     <strong>Bitrate:</strong>
-                    <div id="stat-bitrate" style="color: #0066cc;">- Kbps</div>
+                    <div id="stat-bitrate" class="stat-value">- Kbps</div>
                 </div>
                 <div>
                     <strong>Transferred:</strong>
-                    <div id="stat-transferred" style="color: #0066cc;">0 MB</div>
+                    <div id="stat-transferred" class="stat-value">0 MB</div>
                 </div>
                 <div>
                     <strong>Segments:</strong>
-                    <div id="stat-segments" style="color: #0066cc;">0</div>
+                    <div id="stat-segments" class="stat-value">0</div>
                 </div>
                 <div>
                     <strong>Duration:</strong>
-                    <div id="stat-duration" style="color: #0066cc;">0s</div>
+                    <div id="stat-duration" class="stat-value">0s</div>
                 </div>
                 <div>
                     <strong>Cache Hits:</strong>
-                    <div id="stat-cache" style="color: #0066cc;">0</div>
+                    <div id="stat-cache" class="stat-value">0</div>
                 </div>
                 <div>
                     <strong>Buffer Health:</strong>
-                    <div id="stat-buffer-health" style="color: #0066cc;">-</div>
+                    <div id="stat-buffer-health" class="stat-value">-</div>
                 </div>
             </div>
 
             <!-- Transfer Rate Graph -->
-            <div style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div class="graph-section">
+                <div class="graph-header">
                     <strong>Transfer Rate</strong>
-                    <span id="graph-current-rate" style="color: #0066cc; font-size: 13px;">0 KB/s</span>
+                    <span id="graph-current-rate" class="graph-current-value">0 KB/s</span>
                 </div>
-                <div style="display: flex; gap: 4px;">
-                    <div id="graph-y-labels" style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #666; height: 80px; padding: 2px 0; min-width: 55px; text-align: right;"></div>
-                    <canvas id="rate-graph" width="545" height="80" style="width: calc(100% - 59px); height: 80px;"></canvas>
+                <div class="graph-container">
+                    <div id="graph-y-labels" class="graph-y-labels"></div>
+                    <canvas id="rate-graph" height="80" class="graph-canvas"></canvas>
                 </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; margin-top: 4px; margin-left: 59px;">
+                <div class="graph-x-labels">
                     <span>60s ago</span>
                     <span>now</span>
                 </div>
             </div>
-            
+
             <!-- Stream Delay Graph -->
-            <div id="delay-graph-container" style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 16px; display: none;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div id="delay-graph-container" class="graph-section hidden">
+                <div class="graph-header">
                     <strong>Stream Delay</strong>
-                    <span id="graph-current-delay" style="color: #dc2626; font-size: 13px;">0.0s</span>
+                    <span id="graph-current-delay" class="graph-current-value graph-delay-value">0.0s</span>
                 </div>
-                <div style="display: flex; gap: 4px;">
-                    <div id="delay-y-labels" style="display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #666; height: 80px; padding: 2px 0; min-width: 55px; text-align: right;"></div>
-                    <canvas id="delay-graph" width="545" height="80" style="width: calc(100% - 59px); height: 80px;"></canvas>
+                <div class="graph-container">
+                    <div id="delay-y-labels" class="graph-y-labels"></div>
+                    <canvas id="delay-graph" height="80" class="graph-canvas"></canvas>
                 </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; margin-top: 4px; margin-left: 59px;">
+                <div class="graph-x-labels">
                     <span>60s ago</span>
                     <span>now</span>
                 </div>
@@ -216,12 +216,12 @@
             </div>
         </footer>
     </div>
-    
-    <div id="help-modal" class="modal" style="display:none;">
+
+    <div id="help-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
                 <h2>How to Use HomeCast</h2>
-                <button class="modal-close" onclick="closeHelp()">&times;</button>
+                <button class="modal-close" id="help-close-btn">&times;</button>
             </div>
             <div class="modal-body">
                 <h3>Quick Start</h3>
@@ -231,14 +231,14 @@
                     <li>Click "Analyze" to extract the video source</li>
                     <li>Click "Start Casting" to begin playback</li>
                 </ol>
-                
+
                 <h3>Tips</h3>
                 <ul>
                     <li><strong>Proxy Stream:</strong> Keep this enabled for most videos. It fixes CORS issues and enables HLS/m3u8 streaming.</li>
                     <li><strong>Manual IP:</strong> If your device isn't found, select "Enter IP Manually" and enter the Chromecast's IP address.</li>
                     <li><strong>Supported Formats:</strong> MP4, WebM, HLS (m3u8), and many streaming services.</li>
                 </ul>
-                
+
                 <h3>Troubleshooting</h3>
                 <ul>
                     <li><strong>No devices found:</strong> Ensure Chromecast and server are on the same network.</li>
@@ -248,7 +248,7 @@
             </div>
         </div>
     </div>
-    
+
     <script src="script.js"></script>
 </body>
 </html>
