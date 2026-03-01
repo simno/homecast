@@ -129,6 +129,9 @@ ws.onmessage = (event) => {
         const selectedDeviceIp = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
         if (data.deviceIp === selectedDeviceIp) {
             updateStreamStats(data.stats);
+            if (data.bufferHealth) {
+                updateBufferHealth(data.bufferHealth);
+            }
             // Update delay graph at same rate as transfer rate (when segments complete)
             if (data.stats.delay !== undefined && data.stats.delay > 0) {
                 updateDelayGraph(data.stats.delay);

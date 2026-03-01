@@ -18,6 +18,7 @@ const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
 const { resolveM3u8Url, tryNextSegment } = require('../lib/proxy');
+const { getBufferHealthStats } = require('../lib/stats');
 
 const router = express.Router();
 
@@ -195,6 +196,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                         broadcast({
                             type: 'streamStats',
                             deviceIp: deviceIp,
+                            bufferHealth: getBufferHealthStats(deviceIp),
                             stats: { ...stats }
                         });
                     } else if (!stats.frameRate) {
@@ -211,6 +213,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                                 broadcast({
                                     type: 'streamStats',
                                     deviceIp: deviceIp,
+                                    bufferHealth: getBufferHealthStats(deviceIp),
                                     stats: { ...stats }
                                 });
                             }
@@ -363,6 +366,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             broadcast({
                 type: 'streamStats',
                 deviceIp: deviceIp,
+                bufferHealth: getBufferHealthStats(deviceIp),
                 stats: {
                     totalBytes: stats.totalBytes,
                     totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
