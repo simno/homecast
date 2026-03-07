@@ -1,13 +1,21 @@
-
 <svg width="256" height="256" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <style>
+        circle.bg { fill: #161b22; }
+        .icon { stroke: #7c8cf8; }
+        @media (prefers-color-scheme: light) {
+            circle.bg { fill: #f6f8fa; }
+            .icon { stroke: #4f46e5; }
+        }
+    </style>
+
     <!-- Background circle -->
-    <circle cx="24" cy="24" r="24" fill="#0a0e27"/>
-    
-    <!-- TV/Monitor Screen -->
-    <rect x="6" y="6" width="36" height="24" rx="2" stroke="#06b6d4" stroke-width="2.5" fill="none"/>
-    
-    <!-- Cast waves -->
-    <path d="M6 38 A16 16 0 0 1 22 38" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-    <path d="M6 42 A12 12 0 0 1 18 42" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" fill="none"/>
-    <path d="M6 46 A8 8 0 0 1 14 46" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <circle class="bg" cx="24" cy="24" r="24"/>
+
+    <!-- Rounded screen shape -->
+    <rect class="icon" x="8" y="10" width="32" height="24" rx="4" stroke-width="2.5" fill="none"/>
+
+    <!-- Wifi-arc from bottom-left corner -->
+    <path class="icon" d="M8 34 A18 18 0 0 1 26 34" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25"/>
+    <path class="icon" d="M8 38 A14 14 0 0 1 22 38" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+    <path class="icon" d="M8 42 A10 10 0 0 1 18 42" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.85"/>
 </svg>

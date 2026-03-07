@@ -4,8 +4,8 @@
   "description": "Self-hosted Chromecast streaming for your home network",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0e27",
-  "theme_color": "#06b6d4",
+  "background_color": "#0e1117",
+  "theme_color": "#7c8cf8",
   "icons": [
     {
       "src": "icon-192.png",
