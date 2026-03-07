@@ -77,7 +77,16 @@ export default [
                 Array: 'readonly',
                 JSON: 'readonly',
                 parseInt: 'readonly',
-                encodeURIComponent: 'readonly'
+                parseFloat: 'readonly',
+                encodeURIComponent: 'readonly',
+                getComputedStyle: 'readonly',
+                requestAnimationFrame: 'readonly',
+                Date: 'readonly',
+                Map: 'readonly',
+                Math: 'readonly',
+                Object: 'readonly',
+                isNaN: 'readonly',
+                Error: 'readonly'
             }
         }
     },

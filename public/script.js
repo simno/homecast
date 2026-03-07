@@ -14,7 +14,6 @@ const statusError = document.getElementById('status-error');
 const streamBar = document.getElementById('stream-bar');
 const addStreamBtn = document.getElementById('add-stream-btn');
 const composePanel = document.getElementById('compose-panel');
-const dashboard = document.getElementById('dashboard');
 const composeOverlay = document.getElementById('compose-overlay');
 
 // ===== STATE =====
