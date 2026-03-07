@@ -8,7 +8,7 @@
 [![Test](https://github.com/simno/homecast/actions/workflows/test.yml/badge.svg)](https://github.com/simno/homecast/actions/workflows/test.yml)
 [![Docker](https://github.com/simno/homecast/actions/workflows/docker.yml/badge.svg)](https://github.com/simno/homecast/actions/workflows/docker.yml)
 [![Docker Version](https://ghcr-badge.egpl.dev/simno/homecast/tags?label=version&n=1&ignore=sha256*,latest)](https://github.com/simno/homecast/pkgs/container/homecast)
-[![Node](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D25-brightgreen.svg)](https://nodejs.org)
 
 Stream videos from the web to your Chromecast devices. Simple, fast, and fully self-hosted.
 
