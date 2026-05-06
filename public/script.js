@@ -134,6 +134,9 @@ function createStreamEntry(ip, deviceName) {
         stats: {},
         rateHistory: [],
         delayHistory: [],
+        currentRate: 0,
+        currentDelay: 0,
+        hasDelay: false,
         health: 'healthy',
         bufferHealth: null,
         lastStatsAt: Date.now()
@@ -550,16 +553,12 @@ ws.onmessage = (event) => {
             renderStreamBar();
         }
 
-        // Update rate history
-        const rate = parseFloat(data.stats.transferRate) || 0;
-        stream.rateHistory.push(rate);
-        if (stream.rateHistory.length > MAX_HISTORY) stream.rateHistory.shift();
-
-        // Update delay history
+        // Update current values; the 1Hz tick samples these into history
+        // so the graphs' x-axis is real time, not segment count.
+        stream.currentRate = parseFloat(data.stats.transferRate) || 0;
         if (data.stats.delay !== undefined && data.stats.delay > 0) {
-            const delay = parseFloat(data.stats.delay) || 0;
-            stream.delayHistory.push(delay);
-            if (stream.delayHistory.length > MAX_HISTORY) stream.delayHistory.shift();
+            stream.currentDelay = parseFloat(data.stats.delay) || 0;
+            stream.hasDelay = true;
         }
 
         // Update buffer health
@@ -567,12 +566,11 @@ ws.onmessage = (event) => {
             stream.bufferHealth = data.bufferHealth;
         }
 
-        // Only re-render if this is the active stream
+        // Only re-render if this is the active stream (graphs are driven
+        // by the 1Hz tick below — no need to redraw here).
         if (data.deviceIp === state.activeStreamIp) {
             renderStats(data.stats);
             if (data.bufferHealth) renderBufferHealth(data.bufferHealth);
-            drawRateGraph(stream.rateHistory);
-            if (stream.delayHistory.length > 0) drawDelayGraph(stream.delayHistory);
         }
     }
 
@@ -973,6 +971,27 @@ window.addEventListener('load', async () => {
         }
     }
 });
+
+// ===== GRAPH SAMPLER =====
+// Sample current values once per second so the graphs' x-axis is real time
+// (60 points = 60 seconds). Stats arrive on segment boundaries (every 2-10s),
+// so without this the labelled "60s ago" would be wildly off.
+setInterval(() => {
+    state.streams.forEach((stream, ip) => {
+        stream.rateHistory.push(stream.currentRate || 0);
+        if (stream.rateHistory.length > MAX_HISTORY) stream.rateHistory.shift();
+
+        if (stream.hasDelay) {
+            stream.delayHistory.push(stream.currentDelay || 0);
+            if (stream.delayHistory.length > MAX_HISTORY) stream.delayHistory.shift();
+        }
+
+        if (ip === state.activeStreamIp) {
+            drawRateGraph(stream.rateHistory);
+            if (stream.delayHistory.length > 0) drawDelayGraph(stream.delayHistory);
+        }
+    });
+}, 1000);
 
 // ===== STALENESS CHECK =====
 setInterval(() => {
