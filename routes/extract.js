@@ -5,6 +5,18 @@ const rateLimit = require('express-rate-limit');
 const { httpAgent, httpsAgent } = require('../lib/utils');
 const { searchIframesRecursively, detectResolution } = require('../lib/extraction');
 
+let extractWithBrowser = null;
+function getBrowserExtractor() {
+    if (extractWithBrowser !== null) return extractWithBrowser;
+    try {
+        extractWithBrowser = require('../lib/browser').extractWithBrowser;
+    } catch {
+        console.log('[Extract] Playwright not available, browser fallback disabled');
+        extractWithBrowser = undefined;
+    }
+    return extractWithBrowser;
+}
+
 const router = express.Router();
 
 const apiLimiter = rateLimit({
@@ -63,10 +75,34 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         }
 
         if (foundVideos.size === 0) {
-            const result = await searchIframesRecursively(url, data, url, 0);
-            if (result) {
-                foundVideos.add(result.videoUrl);
-                videoReferer = result.referer;
+            const isSpa = data.length < 5000 && (
+                data.includes('<app-root') ||
+                data.includes('id="root"') ||
+                data.includes('id="app"') ||
+                data.includes('ng-app') ||
+                data.includes('data-reactroot')
+            );
+
+            if (isSpa) {
+                console.log('[Extract] SPA detected, trying headless browser...');
+                const browserExtract = getBrowserExtractor();
+                if (browserExtract) {
+                    const browserVideos = await browserExtract(url);
+                    if (browserVideos) {
+                        for (const v of browserVideos) {
+                            foundVideos.add(v.url);
+                        }
+                        videoReferer = browserVideos[0].referer;
+                    }
+                }
+            }
+
+            if (foundVideos.size === 0 && !isSpa) {
+                const result = await searchIframesRecursively(url, data, url, 0);
+                if (result) {
+                    foundVideos.add(result.videoUrl);
+                    videoReferer = result.referer;
+                }
             }
         }
 
