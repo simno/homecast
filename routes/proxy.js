@@ -30,6 +30,31 @@ const proxyLimiter = rateLimit({
     legacyHeaders: false
 });
 
+async function fetchUpstream(url, headers, axiosConfig) {
+    try {
+        const response = await axios({ ...axiosConfig, url, headers });
+        if (response.status === 401 || response.status === 403) {
+            if (headers['Referer']) {
+                console.log(`[Proxy] Upstream returned ${response.status} with referer, retrying without...`);
+                const noRefererHeaders = { ...headers };
+                delete noRefererHeaders['Referer'];
+                return await axios({ ...axiosConfig, url, headers: noRefererHeaders });
+            }
+        }
+        return response;
+    } catch (err) {
+        if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+            if (headers['Referer']) {
+                console.log(`[Proxy] Upstream returned ${err.response.status} with referer, retrying without...`);
+                const noRefererHeaders = { ...headers };
+                delete noRefererHeaders['Referer'];
+                return await axios({ ...axiosConfig, url, headers: noRefererHeaders });
+            }
+        }
+        throw err;
+    }
+}
+
 // Clean up expired playlist cache entries every 2 minutes
 setInterval(() => {
     const now = Date.now();
@@ -140,11 +165,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const response = await axios({
+            const response = await fetchUpstream(url, headers, {
                 method: 'get',
-                url: url,
                 responseType: 'stream',
-                headers: headers,
                 httpAgent: httpAgent,
                 httpsAgent: httpsAgent,
                 timeout: 30000,
@@ -260,11 +283,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                response = await axios({
+                response = await fetchUpstream(currentUrl, headers, {
                     method: 'get',
-                    url: currentUrl,
                     responseType: 'stream',
-                    headers: headers,
                     httpAgent: httpAgent,
                     httpsAgent: httpsAgent,
                     timeout: 30000,
