@@ -16,6 +16,9 @@ services:
       # Devices not seen for this duration will be removed from the list
       # Increase if your devices send infrequent mDNS updates (e.g., some LG TVs)
       - STALE_DEVICE_TIMEOUT_HOURS=3
+      # Optional: Persistent CSRF secret (auto-generated each restart if not set)
+      # Set this to a random string to keep CSRF tokens valid across restarts
+      # - CSRF_SECRET=your-random-secret-here
       # Optional: Set your machine's LAN IP if auto-detection fails
       # - HOST_IP=192.168.1.100
     healthcheck:

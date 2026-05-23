@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const rateLimit = require('express-rate-limit');
-const { httpAgent, httpsAgent } = require('../lib/utils');
+const { httpAgent, httpsAgent, USER_AGENT } = require('../lib/utils');
 const { searchIframesRecursively, detectResolution } = require('../lib/extraction');
 
 let extractWithBrowser = null;
@@ -30,13 +30,27 @@ const apiLimiter = rateLimit({
 // --- API: Extract Video URL ---
 router.post('/api/extract', apiLimiter, async (req, res) => {
     const { url } = req.body;
+
+    if (!url || typeof url !== 'string') {
+        return res.status(400).json({ error: 'Invalid or missing URL parameter' });
+    }
+
+    try {
+        const parsed = new URL(url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return res.status(400).json({ error: 'Only http and https URLs are allowed' });
+        }
+    } catch {
+        return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
     let videoReferer = url;
 
     try {
         if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) return res.json({ videos: [{ url, referer: url }] });
 
         const { data } = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
+            headers: { 'User-Agent': USER_AGENT },
             httpAgent: httpAgent,
             httpsAgent: httpsAgent,
             timeout: 10000

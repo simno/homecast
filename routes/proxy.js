@@ -11,7 +11,8 @@ const {
     httpAgent,
     httpsAgent,
     CACHE_TTL_VOD,
-    CACHE_TTL_LIVE
+    CACHE_TTL_LIVE,
+    USER_AGENT
 } = require('../lib/utils');
 const { validateProxyUrl } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
@@ -55,7 +56,9 @@ async function fetchUpstream(url, headers, axiosConfig) {
     }
 }
 
-// Clean up expired playlist cache entries every 2 minutes
+const MAX_CACHE_SIZE = 100;
+
+// Clean up expired and excess playlist cache entries every 2 minutes
 setInterval(() => {
     const now = Date.now();
     let cleaned = 0;
@@ -66,8 +69,20 @@ setInterval(() => {
             cleaned++;
         }
     }
+
+    // Evict oldest entries if still over the max size
+    if (playlistCache.size > MAX_CACHE_SIZE) {
+        const entries = [...playlistCache.entries()]
+            .sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toEvict = entries.slice(0, playlistCache.size - MAX_CACHE_SIZE);
+        for (const [key] of toEvict) {
+            playlistCache.delete(key);
+            cleaned++;
+        }
+    }
+
     if (cleaned > 0) {
-        console.log(`[Cache] Cleaned ${cleaned} expired playlist entries`);
+        console.log(`[Cache] Cleaned ${cleaned} playlist entries`);
     }
 }, 120000);
 
@@ -135,7 +150,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
     try {
         const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': USER_AGENT
         };
         if (referer) headers['Referer'] = referer;
 

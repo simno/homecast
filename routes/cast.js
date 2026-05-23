@@ -5,16 +5,46 @@ const { castToAirPlayDevice, stopAirPlayCasting } = require('../lib/airplay');
 
 const router = express.Router();
 
+// IPv4 address or hostname validation
+const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+function validateIp(ip) {
+    if (!ip || typeof ip !== 'string') return false;
+    if (ip === 'localhost') return true;
+    if (IP_RE.test(ip)) {
+        const parts = ip.split('.').map(Number);
+        return parts.every(p => p >= 0 && p <= 255);
+    }
+    return false;
+}
+
+function validateUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    try {
+        const u = new URL(url);
+        return ['http:', 'https:'].includes(u.protocol);
+    } catch {
+        return false;
+    }
+}
+
 // --- API: Cast ---
 router.post('/api/cast', (req, res) => {
     const { ip, url, proxy, referer, deviceType } = req.body;
 
-    // Route to AirPlay or Chromecast based on device type
-    if (deviceType === 'airplay' || (devices[ip]?.type === 'airplay')) {
-        return castToAirPlayDevice(ip, url, proxy, referer, res);
+    if (!validateIp(ip)) {
+        return res.status(400).json({ error: 'Invalid or missing IP address' });
+    }
+    if (!validateUrl(url)) {
+        return res.status(400).json({ error: 'Invalid or missing URL. Only http and https protocols are allowed.' });
     }
 
-    castToDevice(ip, url, proxy, referer, res);
+    // Route to AirPlay or Chromecast based on device type
+    if (deviceType === 'airplay' || (devices[ip]?.type === 'airplay')) {
+        return castToAirPlayDevice(ip, url, !!proxy, referer || '', res);
+    }
+
+    castToDevice(ip, url, !!proxy, referer || '', res);
 });
 
 // --- API: Get Session State ---
@@ -55,8 +85,8 @@ router.post('/api/stop', async (req, res) => {
     const { ip } = req.body;
     console.log(`[Stop] Request received for IP: ${ip}`);
 
-    if (!ip) {
-        return res.status(400).json({ error: 'IP address required' });
+    if (!validateIp(ip)) {
+        return res.status(400).json({ error: 'Invalid or missing IP address' });
     }
 
     // Check AirPlay sessions first

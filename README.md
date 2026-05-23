@@ -165,7 +165,10 @@ For these services, use their official apps or browser extensions.
 | `STALE_DEVICE_TIMEOUT_HOURS` | `3`           | Hours before inactive devices are removed (increase if devices send infrequent mDNS updates) |
 | `HOST_IP`                    | Auto-detect   | Server IP for callbacks                                                                      |
 | `NODE_ENV`                   | `development` | Set to `production` for deployment                                                           |
+| `CSRF_SECRET`                | Auto-generated| Persistent CSRF secret (set to keep tokens valid across restarts)                            |
+| `DISABLE_CSRF`               | `false`       | Disable CSRF protection (not recommended)                                                    |
 | `DISABLE_SSRF_PROTECTION`    | `false`       | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
+| `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected | Path to Playwright browser binaries                                                          |
 
 ### Security
 

@@ -14,7 +14,9 @@
     "lib": ["ES2022"]
   },
   "include": [
-    "server.js"
+    "server.js",
+    "lib/**/*.js",
+    "routes/**/*.js"
   ],
   "exclude": [
     "node_modules/**",

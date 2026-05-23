@@ -65,7 +65,7 @@ app.use('/proxy', (_req, res, next) => {
 });
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(express.static('public'));
 
@@ -111,9 +111,10 @@ app.use(castRouter);
 app.use(statsRouter);
 app.use(proxyRouter);
 
-// Global error handler
+// Global error handler — log and exit; the process is in an undefined state
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
+    process.exit(1);
 });
 
 // Initialize subsystems
@@ -132,8 +133,43 @@ if (require.main === module) {
         console.log(`[Server] Local IP: ${getLocalIp()}`);
         console.log('[Server] Waiting for Chromecast devices...');
     });
-}
 
-// Re-export for backward compatibility with tests
-const { resolveM3u8Url } = require('./lib/proxy');
-module.exports = { resolveM3u8Url };
+    // Graceful shutdown: handle SIGTERM (Docker stop) and SIGINT (Ctrl+C)
+    let shuttingDown = false;
+    const shutdown = (signal) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`\n[Server] Received ${signal}, shutting down gracefully...`);
+
+        // Close WebSocket connections
+        wss.clients.forEach((ws) => ws.close(1000, 'Server shutting down'));
+
+        // Close HTTP server (stops accepting new connections)
+        server.close(() => {
+            console.log('[Server] HTTP server closed');
+
+            // Close Playwright browser if open
+            try {
+                const { closeBrowser } = require('./lib/browser');
+                closeBrowser().catch(() => {});
+            } catch { /* browser module may not be loaded */ }
+
+            process.exit(0);
+        });
+
+        // Force exit after 10s if clean shutdown hangs
+        setTimeout(() => {
+            console.error('[Server] Forced shutdown after timeout');
+            process.exit(1);
+        }, 10000);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+
+    // Unhandled rejections should also exit
+    process.on('unhandledRejection', (reason) => {
+        console.error('Unhandled Rejection:', reason);
+        process.exit(1);
+    });
+}
