@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/proxy.test.js && node test/cache.test.js && node test/extract.test.js && node test/playlist.test.js && node test/edge-cases.test.js && node test/performance.test.js && node test/stream-detection.test.js && node test/airplay.test.js",
+    "test": "node test/proxy.test.js && node test/cache.test.js && node test/extract.test.js && node test/playlist.test.js && node test/edge-cases.test.js && node test/performance.test.js && node test/stream-detection.test.js && node test/airplay.test.js && node test/airplay-pairing.test.js",
     "test:proxy": "node test/proxy.test.js",
     "test:cache": "node test/cache.test.js",
     "test:extract": "node test/extract.test.js",

@@ -72,3 +72,6 @@ Thumbs.db
 dist/
 build/
 /homecast.iml
+
+# AirPlay pairing data
+data/airplay-pairings.json

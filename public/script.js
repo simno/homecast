@@ -15,6 +15,14 @@ const streamBar = document.getElementById('stream-bar');
 const addStreamBtn = document.getElementById('add-stream-btn');
 const composePanel = document.getElementById('compose-panel');
 const composeOverlay = document.getElementById('compose-overlay');
+const pinModal = document.getElementById('pin-modal');
+const pinInput = document.getElementById('pin-input');
+const pinSubmitBtn = document.getElementById('pin-submit-btn');
+const pinCancelBtn = document.getElementById('pin-cancel-btn');
+const pinCloseBtn = document.getElementById('pin-close-btn');
+const pinDeviceName = document.getElementById('pin-device-name');
+const pinStatus = document.getElementById('pin-status');
+const pinTitle = document.getElementById('pin-title');
 
 // ===== STATE =====
 const MAX_HISTORY = 60;
@@ -27,7 +35,14 @@ const state = {
     compose: {
         analyzedStreams: [],
         status: null
-    }
+    },
+    pairing: {
+        inProgress: false,
+        deviceIp: null,
+        deviceName: null,
+        pendingCast: null
+    },
+    pairedDevices: new Set() // IPs of known-paired devices from server
 };
 
 let csrfToken = null;
@@ -391,6 +406,128 @@ function filterDeviceDropdown() {
     });
 }
 
+// ===== PIN PAIRING MODAL =====
+function showPinPrompt(ip, deviceName) {
+    state.pairing.deviceIp = ip;
+    state.pairing.deviceName = deviceName;
+    pinDeviceName.textContent = deviceName || ip;
+    pinInput.value = '';
+    pinInput.disabled = false;
+    pinSubmitBtn.disabled = true;
+    pinStatus.classList.add('hidden');
+    pinTitle.textContent = 'Enter AirPlay PIN';
+    pinModal.classList.remove('hidden');
+    setTimeout(() => pinInput.focus(), 100);
+}
+
+function hidePinPrompt() {
+    pinModal.classList.add('hidden');
+    state.pairing.deviceIp = null;
+    state.pairing.deviceName = null;
+    state.pairing.inProgress = false;
+}
+
+function setPinStatus(message, type) {
+    pinStatus.textContent = message;
+    pinStatus.className = 'pin-status';
+    if (type) pinStatus.classList.add(type);
+    pinStatus.classList.remove('hidden');
+}
+
+async function submitPin() {
+    const ip = state.pairing.deviceIp;
+    const pin = pinInput.value.trim();
+    if (!ip || !pin) return;
+
+    state.pairing.inProgress = true;
+    pinInput.disabled = true;
+    pinSubmitBtn.disabled = true;
+    setPinStatus('Pairing with device...', 'loading');
+
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+        const res = await fetch(`/api/airplay/pair/${encodeURIComponent(ip)}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ pin })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            setPinStatus('Pairing successful!', 'success');
+            state.pairedDevices.add(ip);
+            // If we had a pending cast, retry it
+            if (state.pairing.pendingCast) {
+                setTimeout(() => {
+                    hidePinPrompt();
+                    retryCastAfterPairing(state.pairing.pendingCast);
+                    state.pairing.pendingCast = null;
+                }, 1000);
+            } else {
+                setTimeout(hidePinPrompt, 1500);
+            }
+        } else if (data.code === 'WRONG_PIN') {
+            setPinStatus('Wrong PIN. Check the number on your Apple TV and try again.', 'error');
+            pinInput.value = '';
+            pinInput.disabled = false;
+            pinSubmitBtn.disabled = false;
+            state.pairing.inProgress = false;
+            pinInput.focus();
+        } else {
+            setPinStatus('Pairing failed: ' + (data.error || 'Unknown error'), 'error');
+            pinInput.disabled = false;
+            pinSubmitBtn.disabled = true;
+            state.pairing.inProgress = false;
+        }
+    } catch (e) {
+        setPinStatus('Network error: ' + e.message, 'error');
+        pinInput.disabled = false;
+        pinSubmitBtn.disabled = true;
+        state.pairing.inProgress = false;
+    }
+}
+
+function retryCastAfterPairing(params) {
+    // Re-invoke start casting with the stored params
+    const { ip, url, proxy, referer, deviceType } = params;
+    castBtn.disabled = true;
+    updateStatus('Retrying cast after pairing...', 'loading');
+
+    fetch('/api/cast', {
+        method: 'POST',
+        headers: Object.assign(
+            { 'Content-Type': 'application/json' },
+            csrfToken ? { 'X-CSRF-Token': csrfToken } : {}
+        ),
+        body: JSON.stringify({ ip, url, proxy, referer, deviceType })
+    }).then(r => r.json()).then(data => {
+        if (data.error && data.needsPairing) {
+            throw new Error(data.error);
+        }
+        if (data.error && data.troubleshooting) {
+            updateStatus(`Cast failed: ${data.error}`, 'error');
+            castBtn.disabled = false;
+        } else if (data.error) {
+            throw new Error(data.error);
+        } else {
+            const deviceName = findDeviceName(ip);
+            const dt = state.devices.find(d => d.ip === ip)?.type || 'chromecast';
+            createStreamEntry(ip, deviceName, dt);
+            state.activeStreamIp = ip;
+            renderStreamBar();
+            closeComposeOverlay();
+            setMode('dashboard');
+            updateStatus('Casting started!', 'success');
+            saveState();
+        }
+    }).catch(e => {
+        console.error('Retry cast error:', e);
+        updateStatus(`Cast failed: ${e.message}`, 'error');
+        castBtn.disabled = false;
+    });
+}
+
 // ===== GRAPH DRAWING =====
 function drawRateGraph(rateHistory) {
     const canvas = document.getElementById('rate-graph');
@@ -642,6 +779,14 @@ ws.onmessage = (event) => {
             handleStreamRecovery(data);
         }
     }
+
+    if (data.type === 'pairingStatus') {
+        if (data.status === 'paired') {
+            state.pairedDevices.add(data.deviceIp);
+        } else if (data.status === 'unpaired') {
+            state.pairedDevices.delete(data.deviceIp);
+        }
+    }
 };
 
 ws.onerror = () => {
@@ -830,6 +975,14 @@ async function startCasting() {
 
         const data = await res.json();
 
+        if (data.needsPairing) {
+            // AirPlay device requires PIN pairing
+            showPinPrompt(data.deviceIp, data.deviceName);
+            state.pairing.pendingCast = { ip, url, proxy, referer, deviceType };
+            castBtn.disabled = false;
+            return;
+        }
+
         if (data.error) {
             throw new Error(data.error);
         }
@@ -933,6 +1086,24 @@ document.querySelector('.compose-overlay-backdrop')?.addEventListener('click', c
 document.getElementById('help-close-btn')?.addEventListener('click', closeHelp);
 document.getElementById('help-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'help-modal') closeHelp();
+});
+
+// PIN modal events
+pinInput?.addEventListener('input', () => {
+    const val = pinInput.value.trim();
+    pinSubmitBtn.disabled = !val || !(/^\d{4,8}$/.test(val));
+});
+
+pinInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !pinSubmitBtn.disabled) submitPin();
+    if (e.key === 'Escape') hidePinPrompt();
+});
+
+pinSubmitBtn?.addEventListener('click', submitPin);
+pinCancelBtn?.addEventListener('click', hidePinPrompt);
+pinCloseBtn?.addEventListener('click', hidePinPrompt);
+pinModal?.addEventListener('click', (e) => {
+    if (e.target === pinModal) hidePinPrompt();
 });
 
 // ===== INITIALIZATION =====

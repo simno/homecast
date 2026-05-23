@@ -989,6 +989,57 @@ select:focus {
 .modal-body li { margin-bottom: 6px; }
 .modal-body strong { color: var(--text); font-weight: 500; }
 
+/* ===== PIN MODAL ===== */
+.pin-input-field {
+    font-size: 2em;
+    text-align: center;
+    letter-spacing: 0.5em;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    color: var(--text);
+    outline: none;
+    margin-top: 16px;
+}
+
+.pin-input-field:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-bg);
+}
+
+.pin-status {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: 0.9em;
+    text-align: center;
+    font-weight: 500;
+}
+
+.pin-status.loading {
+    background: var(--primary-bg);
+    color: var(--primary);
+}
+
+.pin-status.success {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.pin-status.error {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.pin-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
 /* ===== RESPONSIVE: Tablet ===== */
 @media (max-width: 768px) {
     .top-bar {

@@ -16,6 +16,7 @@ const extractRouter = require('./routes/extract');
 const castRouter = require('./routes/cast');
 const statsRouter = require('./routes/stats');
 const proxyRouter = require('./routes/proxy');
+const airplayPairingRouter = require('./routes/airplay-pairing');
 
 const app = express();
 const server = http.createServer(app);
@@ -98,6 +99,8 @@ if (CSRF_ENABLED) {
     app.use('/api/cast', doubleCsrfProtection);
     app.use('/api/stop', doubleCsrfProtection);
     app.use('/api/extract', doubleCsrfProtection);
+    app.use('/api/airplay/pair', doubleCsrfProtection);
+    app.use('/api/airplay/unpair', doubleCsrfProtection);
 
     console.log('[Security] CSRF protection enabled');
 } else {
@@ -110,6 +113,7 @@ app.use(extractRouter);
 app.use(castRouter);
 app.use(statsRouter);
 app.use(proxyRouter);
+app.use(airplayPairingRouter);
 
 // Global error handler — log and exit; the process is in an undefined state
 process.on('uncaughtException', (err) => {
@@ -123,6 +127,9 @@ initAirPlayDiscovery();
 startHealthMonitoring();
 startAirPlayHealthMonitoring();
 startStallDetection();
+require('./lib/airplay-pairing-store').initPairingStore().catch(err => {
+    console.error('[AirPlay-Pairing] Failed to init pairing store:', err);
+});
 
 // Only start server if not being required as a module
 if (require.main === module) {

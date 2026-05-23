@@ -24,14 +24,10 @@
         <header class="top-bar">
             <div class="top-bar-brand">
                 <svg class="logo" width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Screen -->
-                    <rect x="7" y="6" width="34" height="28" rx="4" stroke="currentColor" stroke-width="2.5"/>
-                    <!-- Stand -->
-                    <path d="M18 34h12l-2 8H20z" fill="currentColor"/>
-                    <!-- Cast waves -->
-                    <path d="M8 19a12 12 0 0 1 9 3.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                    <path d="M8 15a16 16 0 0 1 12.5 5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                    <path d="M8 11a20 20 0 0 1 16 6.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <rect x="8" y="10" width="32" height="24" rx="4" stroke="currentColor" stroke-width="2.5"/>
+                    <path d="M8 34 A18 18 0 0 1 26 34" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.25"/>
+                    <path d="M8 38 A14 14 0 0 1 22 38" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+                    <path d="M8 42 A10 10 0 0 1 18 42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/>
                 </svg>
                 <span class="top-bar-title">HomeCast</span>
             </div>
@@ -238,6 +234,26 @@
             <div class="compose-overlay-backdrop"></div>
         </div>
 
+    </div>
+
+    <!-- PIN Pairing Modal -->
+    <div id="pin-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="pin-title">Enter AirPlay PIN</h2>
+                <button class="modal-close" id="pin-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Enter the PIN code displayed on your <strong id="pin-device-name">Apple TV</strong>:</p>
+                <input type="text" id="pin-input" class="pin-input-field" maxlength="8" pattern="[0-9]*" inputmode="numeric"
+                       autocomplete="off" placeholder="1234">
+                <div id="pin-status" class="pin-status hidden"></div>
+                <div class="pin-actions">
+                    <button id="pin-cancel-btn" class="btn-secondary" style="flex: 1;">Cancel</button>
+                    <button id="pin-submit-btn" class="btn-primary" style="flex: 2;" disabled>Pair</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="help-modal" class="modal hidden">

@@ -2,7 +2,7 @@
 
 <h1 style="margin: 0;"><img src="./public/icon-192.png" alt="HomeCast" width="48" height="48" style="vertical-align: middle;"> HomeCast</h1>
 
-**🏠 Self-hosted Chromecast streaming for your home network**
+**🏠 Self-hosted streaming to Chromecast and Apple TV**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test](https://github.com/simno/homecast/actions/workflows/test.yml/badge.svg)](https://github.com/simno/homecast/actions/workflows/test.yml)
@@ -10,7 +10,7 @@
 [![Docker Version](https://ghcr-badge.egpl.dev/simno/homecast/tags?label=version&n=1&ignore=sha256*,latest)](https://github.com/simno/homecast/pkgs/container/homecast)
 [![Node](https://img.shields.io/badge/node-%3E%3D26-brightgreen.svg)](https://nodejs.org)
 
-Stream videos from the web to your Chromecast devices. Simple, fast, and fully self-hosted.
+Stream videos from the web to your Chromecast and Apple TV devices. Simple, fast, and fully self-hosted.
 
 [Features](#features) • [Installation](#installation) • [Usage](#usage)
 
@@ -20,14 +20,14 @@ Stream videos from the web to your Chromecast devices. Simple, fast, and fully s
 
 ## Info
 
-For many TVs or Chromecast devices, streaming directly from websites can be challenging due to compatibility issues,
-CORS restrictions, or unsupported formats. Also using a laptop or mobile browser to cast can be unreliable, drain
-battery life and interrupt other tasks. HomeCast solves this by acting as a smart intermediary that extracts video
-sources from webpages and serves them to your Chromecast in a compatible format.
+For many TVs or streaming devices, casting directly from websites can be challenging due to compatibility issues,
+CORS restrictions, or unsupported formats. Using a laptop or mobile browser to cast can also be unreliable, drain
+battery life, and interrupt other tasks. HomeCast solves this by acting as a smart intermediary that extracts video
+sources from webpages and serves them to your devices in a compatible format.
 
 > [!WARNING]
-> This is a personal project only tested on a single streaming source. Other sites probably won't work without further
-> development. See [Limitations](#limitations) for details.
+> This is a personal project primarily tested on a limited set of streaming sources. Other sites probably won't work
+> without further development. See [Limitations](#limitations) for details.
 
 > [!IMPORTANT]
 > **Security Notice:** HomeCast is designed for self-hosted use on **trusted private networks** only.
@@ -37,15 +37,18 @@ sources from webpages and serves them to your Chromecast in a compatible format.
 
 ## Features
 
-- 🔍 **Auto-Discovery** - Finds Chromecast devices automatically
-- 🎯 **Smart Extraction** - Attempts to detect video sources from any webpage
-- 🌐 **HLS Support** - Handles live streams and adaptive bitrate
-- 🔒 **SSRF Protection** - Blocks access to private IPs and localhost
-- ⚡ **Rate Limiting** - Prevents abuse with per-IP limits
-- ⚡  **Optimized Performance** - Connection pooling, DNS caching, large buffers
-- 🐳 **Docker Ready** - One command to run
-- 🔒 **Private** - Everything stays on your network
-- 💨 **Lightweight** - <50MB Docker image
+- 🔍 **Auto-Discovery** — Finds Chromecast and Apple TV devices automatically via mDNS
+- 🎯 **Smart Extraction** — Detects video sources from webpages
+- 🌐 **HLS Support** — Handles live streams and adaptive bitrate
+-  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
+- 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
+- ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
+- 🔒 **SSRF Protection** — Blocks access to private IPs and localhost
+- ⚡ **Rate Limiting** — Prevents abuse with per-IP limits
+- ⚡ **Optimized Performance** — Connection pooling, DNS caching, large buffers
+- 🐳 **Docker Ready** — One command to run
+- 🔒 **Private** — Everything stays on your network
+- 💨 **Lightweight** — ~70MB Docker image
 
 ## Screenshots
 
@@ -126,10 +129,25 @@ node server.js
 
 ## Usage
 
-1. **Select Device** - Choose your Chromecast from the dropdown
-2. **Enter URL** - Paste any video URL or webpage
-3. **Analyze** - Click to extract the video source
-4. **Cast** - Hit the cast button and enjoy!
+1. **Select Device** — Choose your Chromecast or Apple TV from the dropdown
+2. **Enter URL** — Paste any video URL or webpage
+3. **Analyze** — Click to extract the video source
+4. **Cast** — Hit the cast button and enjoy!
+
+### AirPlay & Apple TV
+
+HomeCast discovers Apple TV devices automatically alongside Chromecast devices. Apple TV devices are marked with an
+ icon in the device list.
+
+**If your Apple TV requires a PIN code** (default setting), HomeCast will prompt you to enter the on-screen code the
+first time you cast. After pairing, the credentials are stored and reused automatically.
+
+To configure your Apple TV's AirPlay security:
+- **Allow Access: Everyone** — No PIN required (always works)
+- **Allow Access: Anyone on the Same Network** — May require a PIN
+- **Allow Access: Only People Sharing This Home** — PIN pairing required
+
+All modes are supported by HomeCast.
 
 ### Supported Sources
 
@@ -141,11 +159,11 @@ node server.js
 
 **HomeCast is designed for simple webpage videos only.** It cannot extract streams from:
 
-- **Twitch** - Requires OAuth and complex API authentication
-- **YouTube** - Protected by multiple DRM and anti-scraping measures
-- **Netflix, Disney+, Hulu** - DRM-protected content
-- **Complex streaming platforms** - Sites with encrypted manifests or authentication
-- **MJPEG webcam streams** - Not supported by Chromecast protocol (requires transcoding)
+- **Twitch** — Requires OAuth and complex API authentication
+- **YouTube** — Protected by multiple DRM and anti-scraping measures
+- **Netflix, Disney+, Hulu** — DRM-protected content
+- **Complex streaming platforms** — Sites with encrypted manifests or authentication
+- **MJPEG webcam streams** — Not supported by Chromecast protocol (requires transcoding)
 
 For these services, use their official apps or browser extensions.
 
@@ -159,16 +177,17 @@ For these services, use their official apps or browser extensions.
 
 ### Environment Variables
 
-| Variable                     | Default       | Description                                                                                  |
-|------------------------------|---------------|----------------------------------------------------------------------------------------------|
-| `PORT`                       | `3000`        | Web interface port                                                                           |
-| `STALE_DEVICE_TIMEOUT_HOURS` | `3`           | Hours before inactive devices are removed (increase if devices send infrequent mDNS updates) |
-| `HOST_IP`                    | Auto-detect   | Server IP for callbacks                                                                      |
-| `NODE_ENV`                   | `development` | Set to `production` for deployment                                                           |
-| `CSRF_SECRET`                | Auto-generated| Persistent CSRF secret (set to keep tokens valid across restarts)                            |
-| `DISABLE_CSRF`               | `false`       | Disable CSRF protection (not recommended)                                                    |
-| `DISABLE_SSRF_PROTECTION`    | `false`       | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
-| `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected | Path to Playwright browser binaries                                                          |
+| Variable                     | Default        | Description                                                                                  |
+|------------------------------|----------------|----------------------------------------------------------------------------------------------|
+| `PORT`                       | `3000`         | Web interface port                                                                           |
+| `STALE_DEVICE_TIMEOUT_HOURS` | `3`            | Hours before inactive devices are removed (increase if devices send infrequent mDNS updates) |
+| `HOST_IP`                    | Auto-detect    | Server IP for callbacks                                                                      |
+| `NODE_ENV`                   | `development`  | Set to `production` for deployment                                                           |
+| `CSRF_SECRET`                | Auto-generated | Persistent CSRF secret (set to keep tokens valid across restarts)                            |
+| `DISABLE_CSRF`               | `false`        | Disable CSRF protection (not recommended)                                                    |
+| `DISABLE_SSRF_PROTECTION`    | `false`        | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
+| `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected  | Path to Playwright browser binaries                                                          |
+| `AIRPLAY_PAIRING_STORE`      | `./data/airplay-pairings.json` | Path to AirPlay pairing data file                                           |
 
 ### Security
 
@@ -191,8 +210,9 @@ docker run -e DISABLE_SSRF_PROTECTION=true ...
 
 Ensure these ports are open:
 
-- `3000/tcp` - Web interface (or your custom PORT)
-- `5353/udp` - mDNS device discovery
+- `3000/tcp` — Web interface (or your custom PORT)
+- `5353/udp` — mDNS device discovery
+- `7000/tcp` — AirPlay protocol (outbound to Apple TV devices)
 
 ## Troubleshooting
 
@@ -208,7 +228,7 @@ Ensure these ports are open:
 
 2. **Check discovery logs:**
    ```bash
-   docker logs homecast | grep Discovery
+   docker logs homecast | grep -E "AirPlay|Discovery"
    ```
 
 3. **Debug endpoint:**
@@ -217,16 +237,26 @@ Ensure these ports are open:
 4. **Common issues:**
     - Docker not using `network_mode: host` (bridge mode blocks mDNS)
     - Firewall blocking UDP port 5353
-    - Server and Chromecast on different networks/VLANs
+    - Server and device on different networks/VLANs
     - Container running on a VPS/cloud (mDNS only works on LAN)
 
-5. **Workaround:** Use "Enter IP Manually" and enter your Chromecast's IP address directly.
+5. **Workaround:** Use "Enter IP Manually" and enter your device's IP address directly.
 
 ### Won't Connect
 
-- Verify HOST_IP is set to your server's correct IP
-- Check firewall allows inbound connections on PORT
+- Verify `HOST_IP` is set to your server's correct IP
+- Check firewall allows inbound connections on `PORT`
 - Ensure proxy stream is enabled
+- For AirPlay: verify the Apple TV is on and connected to the same network
+- For AirPlay: check that outbound TCP to port 7000 is not blocked
+
+### AirPlay PIN Pairing Issues
+
+- **Wrong PIN:** Check the Apple TV screen — a new code appears each time. Enter exactly the 4-8 digit number shown.
+- **Pairing fails:** Ensure the Apple TV and server are on the same local network. Try restarting the Apple TV.
+- **Reset pairing:** Delete `data/airplay-pairings.json` on the server, or unpair the device via the API.
+- **"Everyone" mode not working:** Some Apple TV models require at least one pairing before accepting unauthenticated
+  connections. Try pairing once even if set to "Everyone."
 
 ### Video Won't Play
 
@@ -237,30 +267,35 @@ Ensure these ports are open:
 ## How It Works
 
 ```
-┌─────────┐      ┌───────────────────┐      ┌─────────────┐
-│ Browser │ ───> │  HomeCast         │ ───> │ Chromecast  │
-└─────────┘      │   Server          │      └─────────────┘
-                 │                   │
-                 │ • Extract URL     │
-                 │ • Rewrite HLS     │
-                 │ • Proxy Stream    │
-                 │ • Connection Pool │
-                 │ • Smart Cache     │
-                 └───────────────────┘
+┌─────────┐      ┌───────────────────────┐      ┌──────────────────┐
+│ Browser │ ───> │  HomeCast             │ ───> │ Chromecast       │
+└─────────┘      │   Server              │      │ Apple TV         │
+                 │                       │      └──────────────────┘
+                 │ • Extract URL         │
+                 │ • Rewrite HLS         │
+                 │ • Proxy Stream        │
+                 │ • AirPlay Pairing     │
+                 │ • Wake-on-LAN         │
+                 │ • Smart Cache         │
+                 └───────────────────────┘
 ```
 
-HomeCast acts as a bridge between web content and your Chromecast, handling:
+HomeCast acts as a bridge between web content and your devices, handling:
 
 - URL extraction from webpages
 - HLS playlist rewriting for compatibility
 - Stream proxying with adaptive caching
+- AirPlay protocol for Apple TV (discovery, PIN pairing, casting)
+- Chromecast protocol via castv2
+- Wake-on-LAN for sleeping devices
 - CORS handling
 - Performance optimization (connection pooling, DNS caching, buffer tuning)
 
 ## Technical Details
 
-- **Backend**: Node.js, Express
-- **Protocols**: Cast v2, mDNS, HLS
+- **Backend**: Node.js 26+, Express 5
+- **Protocols**: Cast v2, AirPlay 1 (port 7000), mDNS (discovery), HLS
+- **AirPlay**: SRP-6a PIN pairing (2048-bit), Curve25519 + Ed25519 pair-verify
 - **Caching**: Adaptive (4s for live, 60s for VOD)
 - **Performance**: Connection pooling, DNS caching, 256KB buffers
 - **Image**: Alpine Linux (~70MB)
@@ -305,17 +340,17 @@ This project uses GitHub Actions for continuous integration and deployment:
 
 **Docker images are available at:**
 
-- `ghcr.io/simno/homecast:latest` - Latest stable release
-- `ghcr.io/simno/homecast:v*.*.*` - Specific version tags
+- `ghcr.io/simno/homecast:latest` — Latest stable release
+- `ghcr.io/simno/homecast:v*.*.*` — Specific version tags
 
 ### Release Process
 
 The project includes an automated release script that ensures version consistency:
 
 ```bash
-npm run release:patch   # 0.1.0 -> 0.1.1 (bug fixes)
-npm run release:minor   # 0.1.1 -> 0.2.0 (new features)
-npm run release:major   # 0.2.0 -> 1.0.0 (breaking changes)
+npm run release:patch   # 0.1.0 → 0.1.1 (bug fixes)
+npm run release:minor   # 0.1.1 → 0.2.0 (new features)
+npm run release:major   # 0.2.0 → 1.0.0 (breaking changes)
 ```
 
 The script automatically:
@@ -331,11 +366,11 @@ This automatically triggers the Docker workflow to build and publish the new ver
 
 ## License
 
-[MIT License](LICENSE) - Free to use, modify, and distribute.
+[MIT License](LICENSE) — Free to use, modify, and distribute.
 
 ## Acknowledgments
 
 Built with:
 
-- [castv2-client](https://github.com/thibauts/node-castv2-client) - Chromecast protocol
-- [mdns-js](https://github.com/mdns-js/node-mdns-js) - Device discovery
+- [castv2-client](https://github.com/thibauts/node-castv2-client) — Chromecast protocol
+- [mdns-js](https://github.com/mdns-js/node-mdns-js) — Device discovery
