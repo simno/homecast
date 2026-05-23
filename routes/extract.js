@@ -75,12 +75,26 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         }
 
         if (foundVideos.size === 0) {
-            const isSpa = data.length < 5000 && (
-                data.includes('<app-root') ||
+            // Detect SPAs: modern frameworks that render video players client-side.
+            // Drop the tight size limit — many SPAs serve large initial HTML via SSR.
+            const isSpa = (
                 data.includes('id="root"') ||
                 data.includes('id="app"') ||
+                data.includes('id="__next"') ||
+                data.includes('id="__nuxt"') ||
+                data.includes('data-reactroot') ||
+                data.includes('data-react-root') ||
                 data.includes('ng-app') ||
-                data.includes('data-reactroot')
+                data.includes('ng-version') ||
+                data.includes('data-v-') ||
+                data.includes('__NEXT_DATA__') ||
+                data.includes('window.__NUXT__') ||
+                data.includes('window.__INITIAL_STATE__') ||
+                data.includes('_next/static') ||
+                // Streaming sites that render players client-side
+                data.includes('player.twitch.tv') ||
+                data.includes('/js/twitch') ||
+                data.includes('kraken')  // Twitch API bootstrap
             );
 
             if (isSpa) {
