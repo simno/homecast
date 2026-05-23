@@ -748,7 +748,7 @@ async function fetchAndAnalyze() {
             updateStatus(`Found ${data.videos.length} stream${data.videos.length > 1 ? 's' : ''}`, 'success');
             checkReady();
         } else {
-            updateStatus('No video found at this URL', 'error');
+            updateStatus(data.error || 'No video found at this URL', 'error');
         }
     } catch (e) {
         console.error('Extract error:', e);

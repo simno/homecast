@@ -4,6 +4,7 @@ const cheerio = require('cheerio');
 const rateLimit = require('express-rate-limit');
 const { httpAgent, httpsAgent, USER_AGENT } = require('../lib/utils');
 const { searchIframesRecursively, detectResolution } = require('../lib/extraction');
+const { isTwitchUrl, resolveTwitchStream } = require('../lib/twitch');
 
 let extractWithBrowser = null;
 function getBrowserExtractor() {
@@ -48,6 +49,31 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
 
     try {
         if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) return res.json({ videos: [{ url, referer: url }] });
+
+        // Twitch exposes an og:video pointing at its HTML embed player, which the
+        // generic scraper below would mis-classify as a playable MP4. Resolve the
+        // real HLS stream via Twitch's playback-token API instead.
+        if (isTwitchUrl(url)) {
+            const twitch = await resolveTwitchStream(url);
+            if (twitch.status === 'ok') {
+                const resolution = await detectResolution(twitch.url, 'hls');
+                console.log(`[Extract] Resolved Twitch HLS stream: ${twitch.url.substring(0, 80)}...`);
+                return res.json({
+                    videos: [{
+                        url: twitch.url,
+                        referer: twitch.referer,
+                        type: 'hls',
+                        resolution,
+                        unsupported: false
+                    }]
+                });
+            }
+            // The generic scraper only ever finds Twitch's embed player page (an
+            // unplayable HTML doc), so don't fall through — report the real reason.
+            const statusCode = twitch.status === 'offline' ? 404 : 502;
+            console.log(`[Extract] Twitch unavailable (${twitch.status}): ${twitch.message}`);
+            return res.status(statusCode).json({ error: twitch.message });
+        }
 
         const { data } = await axios.get(url, {
             headers: { 'User-Agent': USER_AGENT },

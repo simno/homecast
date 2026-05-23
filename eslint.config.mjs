@@ -26,6 +26,7 @@ export default [
                 Set: 'readonly',
                 Promise: 'readonly',
                 URL: 'readonly',
+                URLSearchParams: 'readonly',
                 Error: 'readonly',
                 encodeURIComponent: 'readonly',
                 decodeURIComponent: 'readonly'
