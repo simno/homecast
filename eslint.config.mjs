@@ -62,6 +62,8 @@ export default [
         // Browser environment for client-side scripts
         files: ['public/**/*.js'],
         languageOptions: {
+            ecmaVersion: 2022,
+            sourceType: 'module',
             globals: {
                 window: 'readonly',
                 document: 'readonly',

@@ -40,7 +40,7 @@ router.post('/api/cast', (req, res) => {
     }
 
     // Route to AirPlay or Chromecast based on device type
-    if (deviceType === 'airplay' || (devices[ip]?.type === 'airplay')) {
+    if (deviceType === 'airplay' || (devices.get(ip)?.type === 'airplay')) {
         return castToAirPlayDevice(ip, url, !!proxy, referer || '', res);
     }
 

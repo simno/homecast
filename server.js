@@ -115,6 +115,16 @@ app.use(statsRouter);
 app.use(proxyRouter);
 app.use(airplayPairingRouter);
 
+// Express error-handling middleware
+app.use((err, _req, res, _next) => {
+    console.error('[Express] Unhandled route error:', err);
+    if (!res.headersSent) {
+        res.status(err.status || 500).json({
+            error: err.expose ? err.message : 'Internal server error'
+        });
+    }
+});
+
 // Global error handler — log and exit; the process is in an undefined state
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);

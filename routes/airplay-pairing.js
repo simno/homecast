@@ -72,7 +72,7 @@ router.get('/api/airplay/pairing-status/:ip', (req, res) => {
     const pairing = paired ? getPairing(ip) : null;
     res.json({
         paired,
-        deviceName: devices[ip]?.name || ip,
+        deviceName: devices.get(ip)?.name || ip,
         pairedAt: pairing?.pairedAt || null,
         deviceId: pairing?.deviceId || null
     });
@@ -108,8 +108,8 @@ router.post('/api/airplay/unpair/:ip', async (req, res) => {
 router.get('/api/airplay/paired-devices', (req, res) => {
     const paired = getAllPairings().map(p => ({
         ...p,
-        online: !!devices[p.ip],
-        currentName: devices[p.ip]?.name || p.deviceName
+        online: devices.has(p.ip),
+        currentName: devices.get(p.ip)?.name || p.deviceName
     }));
     res.json({ devices: paired });
 });

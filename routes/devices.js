@@ -7,7 +7,7 @@ const router = express.Router();
 
 // --- API: List Devices ---
 router.get('/api/devices', (req, res) => {
-    const deviceList = Object.values(devices);
+    const deviceList = [...devices.values()];
     console.log(`[API] Device list requested - returning ${deviceList.length} device(s)`);
     res.json(deviceList);
 });
@@ -17,8 +17,8 @@ router.get('/api/discovery/status', (req, res) => {
     const interfaces = os.networkInterfaces();
 
     res.json({
-        devicesFound: Object.keys(devices).length,
-        devices: devices,
+        devicesFound: devices.size,
+        devices: [...devices.values()],
         networkInterfaces: Object.keys(interfaces).reduce((acc, name) => {
             acc[name] = interfaces[name].filter(i => i.family === 'IPv4');
             return acc;
