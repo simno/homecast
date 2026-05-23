@@ -15,8 +15,8 @@
 
     <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0e1117" media="(prefers-color-scheme: dark)">
-    <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 </head>
 <body>
     <div id="app" data-mode="setup">
@@ -24,10 +24,14 @@
         <header class="top-bar">
             <div class="top-bar-brand">
                 <svg class="logo" width="32" height="32" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="8" y="10" width="32" height="24" rx="4" stroke="currentColor" stroke-width="2.5"/>
-                    <path d="M8 34 A18 18 0 0 1 26 34" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/>
-                    <path d="M8 38 A14 14 0 0 1 22 38" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
-                    <path d="M8 42 A10 10 0 0 1 18 42" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <!-- Screen -->
+                    <rect x="7" y="6" width="34" height="28" rx="4" stroke="currentColor" stroke-width="2.5"/>
+                    <!-- Stand -->
+                    <path d="M18 34h12l-2 8H20z" fill="currentColor"/>
+                    <!-- Cast waves -->
+                    <path d="M8 19a12 12 0 0 1 9 3.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M8 15a16 16 0 0 1 12.5 5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M8 11a20 20 0 0 1 16 6.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
                 </svg>
                 <span class="top-bar-title">HomeCast</span>
             </div>

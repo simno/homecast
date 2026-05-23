@@ -5,6 +5,7 @@ const cookieParser = require('cookie-parser');
 const { doubleCsrf } = require('csrf-csrf');
 const { createWebSocketServer } = require('./lib/websocket');
 const { initDiscovery } = require('./lib/discovery');
+const { initAirPlayDiscovery, startAirPlayHealthMonitoring } = require('./lib/airplay');
 const { startHealthMonitoring } = require('./lib/health');
 const { startStallDetection } = require('./lib/recovery');
 const { getLocalIp, PORT, STALE_DEVICE_TIMEOUT_MS } = require('./lib/utils');
@@ -117,7 +118,9 @@ process.on('uncaughtException', (err) => {
 
 // Initialize subsystems
 initDiscovery();
+initAirPlayDiscovery();
 startHealthMonitoring();
+startAirPlayHealthMonitoring();
 startStallDetection();
 
 // Only start server if not being required as a module

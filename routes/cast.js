@@ -1,12 +1,19 @@
 const express = require('express');
-const { activeSessions, streamStats, playbackTracking } = require('../lib/state');
+const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, devices } = require('../lib/state');
 const { castToDevice, stopCasting } = require('../lib/cast');
+const { castToAirPlayDevice, stopAirPlayCasting } = require('../lib/airplay');
 
 const router = express.Router();
 
 // --- API: Cast ---
 router.post('/api/cast', (req, res) => {
-    const { ip, url, proxy, referer } = req.body;
+    const { ip, url, proxy, referer, deviceType } = req.body;
+
+    // Route to AirPlay or Chromecast based on device type
+    if (deviceType === 'airplay' || (devices[ip]?.type === 'airplay')) {
+        return castToAirPlayDevice(ip, url, proxy, referer, res);
+    }
+
     castToDevice(ip, url, proxy, referer, res);
 });
 
@@ -14,20 +21,33 @@ router.post('/api/cast', (req, res) => {
 router.get('/api/session/:ip', (req, res) => {
     const { ip } = req.params;
 
+    // Check Chromecast sessions
     const session = activeSessions.get(ip);
-    if (!session) {
-        return res.json({ active: false });
+    if (session) {
+        const stats = streamStats.get(ip);
+        const tracking = playbackTracking.get(ip);
+        return res.json({
+            active: true,
+            type: 'chromecast',
+            stats: stats || null,
+            tracking: tracking || null,
+            hasPlayer: !!session.player
+        });
     }
 
-    const stats = streamStats.get(ip);
-    const tracking = playbackTracking.get(ip);
+    // Check AirPlay sessions
+    const airPlaySession = activeAirPlaySessions.get(ip);
+    if (airPlaySession) {
+        const stats = streamStats.get(ip);
+        return res.json({
+            active: true,
+            type: 'airplay',
+            stats: stats || null,
+            startTime: airPlaySession.startTime
+        });
+    }
 
-    res.json({
-        active: true,
-        stats: stats || null,
-        tracking: tracking || null,
-        hasPlayer: !!session.player
-    });
+    res.json({ active: false });
 });
 
 // --- API: Stop Casting ---
@@ -39,6 +59,18 @@ router.post('/api/stop', async (req, res) => {
         return res.status(400).json({ error: 'IP address required' });
     }
 
+    // Check AirPlay sessions first
+    if (activeAirPlaySessions.has(ip)) {
+        try {
+            await stopAirPlayCasting(ip);
+            return res.json({ status: 'stopped' });
+        } catch (err) {
+            console.error('[Stop] AirPlay stop error:', err);
+            return res.status(500).json({ error: 'Failed to stop AirPlay: ' + err.message });
+        }
+    }
+
+    // Check Chromecast sessions
     const session = activeSessions.get(ip);
     if (!session) {
         return res.status(404).json({ error: 'No active session found for this device' });

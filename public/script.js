@@ -41,6 +41,9 @@ function refreshGraphColors() {
     graphColors.delay = s.getPropertyValue('--graph-delay').trim();
     graphColors.delayFill = s.getPropertyValue('--graph-delay-fill').trim();
     graphColors.grid = s.getPropertyValue('--graph-grid').trim();
+    graphColors.success = s.getPropertyValue('--success').trim();
+    graphColors.warning = s.getPropertyValue('--warning').trim();
+    graphColors.danger = s.getPropertyValue('--danger').trim();
 }
 refreshGraphColors();
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -50,6 +53,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
     if (stream) {
         drawRateGraph(stream.rateHistory);
         drawDelayGraph(stream.delayHistory);
+        if (stream.bufferHealth) renderBufferHealth(stream.bufferHealth);
     }
 });
 
@@ -89,7 +93,7 @@ function saveState() {
     try {
         const activeStreams = [];
         state.streams.forEach((stream, ip) => {
-            activeStreams.push({ ip, deviceName: stream.deviceName });
+            activeStreams.push({ ip, deviceName: stream.deviceName, deviceType: stream.deviceType });
         });
         const saved = {
             activeStreams,
@@ -128,9 +132,10 @@ async function checkSessionStatus(deviceIp) {
 // ===== STREAM MANAGEMENT =====
 const STALE_TIMEOUT = 15000; // 15s without stats = stale
 
-function createStreamEntry(ip, deviceName) {
+function createStreamEntry(ip, deviceName, deviceType) {
     state.streams.set(ip, {
         deviceName: deviceName || ip,
+        deviceType: deviceType || 'chromecast',
         stats: {},
         rateHistory: [],
         delayHistory: [],
@@ -239,8 +244,9 @@ function renderDashboard() {
     const stream = state.streams.get(state.activeStreamIp);
     if (!stream) return;
 
-    // Update device name
-    document.getElementById('dashboard-device-name').textContent = stream.deviceName;
+    // Update device name with type indicator
+    const typeLabel = stream.deviceType === 'airplay' ? ' (Apple TV)' : '';
+    document.getElementById('dashboard-device-name').textContent = stream.deviceName + typeLabel;
 
     // Update health indicator
     updateConnectionHealthUI(stream.health);
@@ -335,9 +341,9 @@ function renderBufferHealth(bufferHealth) {
     }
     el.textContent = text;
 
-    if (healthScore >= 95) el.style.color = '#34d399';
-    else if (healthScore >= 85) el.style.color = '#fbbf24';
-    else el.style.color = '#f87171';
+    if (healthScore >= 95) el.style.color = graphColors.success;
+    else if (healthScore >= 85) el.style.color = graphColors.warning;
+    else el.style.color = graphColors.danger;
 }
 
 function updateConnectionHealthUI(healthState) {
@@ -587,7 +593,8 @@ ws.onmessage = (event) => {
             // Ensure stream entry exists (e.g., after page reload)
             if (!stream && ip) {
                 const deviceName = findDeviceName(ip);
-                createStreamEntry(ip, deviceName);
+                const dt = state.devices.find(d => d.ip === ip)?.type || 'chromecast';
+                createStreamEntry(ip, deviceName, dt);
                 if (state.mode === 'setup') {
                     state.activeStreamIp = ip;
                     setMode('dashboard');
@@ -656,7 +663,9 @@ function updateDeviceList(devices) {
         devices.forEach(d => {
             const opt = document.createElement('option');
             opt.value = d.ip;
-            opt.innerText = `${d.name} (${d.ip})`;
+            opt.dataset.type = d.type || 'chromecast';
+            const typeIcon = d.type === 'airplay' ? ' ' : '';
+            opt.innerText = `${d.name} (${d.ip})${typeIcon}`;
             deviceSelect.appendChild(opt);
         });
     }
@@ -805,9 +814,10 @@ async function startCasting() {
     const url = selectedStream.url;
     const referer = selectedStream.referer;
     const proxy = document.getElementById('use-proxy').checked;
+    const deviceType = deviceSelect.selectedOptions[0]?.dataset?.type || 'chromecast';
 
     castBtn.disabled = true;
-    updateStatus('Connecting to Chromecast...', 'loading');
+    updateStatus('Connecting to device...', 'loading');
 
     try {
         const castHeaders = { 'Content-Type': 'application/json' };
@@ -815,7 +825,7 @@ async function startCasting() {
         const res = await fetch('/api/cast', {
             method: 'POST',
             headers: castHeaders,
-            body: JSON.stringify({ ip, url, proxy, referer })
+            body: JSON.stringify({ ip, url, proxy, referer, deviceType })
         });
 
         const data = await res.json();
@@ -831,7 +841,8 @@ async function startCasting() {
         } else {
             // Success: create stream entry and transition to dashboard
             const deviceName = findDeviceName(ip);
-            createStreamEntry(ip, deviceName);
+            const dt = deviceSelect.selectedOptions[0]?.dataset?.type || 'chromecast';
+            createStreamEntry(ip, deviceName, dt);
             state.activeStreamIp = ip;
             renderStreamBar();
 
@@ -937,11 +948,11 @@ window.addEventListener('load', async () => {
             // Wait a moment for device list to arrive via WebSocket
             setTimeout(async () => {
                 let anyActive = false;
-                for (const { ip, deviceName } of savedState.activeStreams) {
+                for (const { ip, deviceName, deviceType } of savedState.activeStreams) {
                     const session = await checkSessionStatus(ip);
                     if (session.active) {
                         const name = findDeviceName(ip) || deviceName || ip;
-                        createStreamEntry(ip, name);
+                        createStreamEntry(ip, name, deviceType || 'chromecast');
                         if (session.stats) {
                             state.streams.get(ip).stats = session.stats;
                         }
