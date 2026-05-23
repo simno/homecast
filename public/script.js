@@ -87,6 +87,24 @@ async function fetchCsrfToken() {
 }
 fetchCsrfToken();
 
+// ===== MATERIAL RIPPLE EFFECT =====
+document.addEventListener('pointerdown', (e) => {
+    const target = e.target.closest('button, .stream-pill, .stream-option');
+    if (!target) return;
+
+    const ripple = document.createElement('span');
+    ripple.classList.add('ripple-effect');
+
+    const rect = target.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    ripple.style.width = ripple.style.height = `${size}px`;
+    ripple.style.left = `${e.clientX - rect.left - size / 2}px`;
+    ripple.style.top = `${e.clientY - rect.top - size / 2}px`;
+
+    target.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+});
+
 // ===== STATE PERSISTENCE =====
 const STATE_KEY = 'homecast_state';
 
