@@ -726,7 +726,9 @@ function checkReady() {
 async function fetchAndAnalyze() {
     const url = document.getElementById('video-url').value.trim();
     if (!url) {
-        alert('Please enter a URL first');
+        statusCard.classList.remove('hidden');
+        updateStatus('Please enter a URL first', 'error');
+        document.getElementById('video-url').focus();
         return;
     }
 
@@ -977,12 +979,24 @@ function handleStreamRecovery(data) {
 }
 
 // ===== HELP MODAL =====
+function openHelp() {
+    document.getElementById('help-modal').classList.remove('hidden');
+    document.getElementById('help-close-btn')?.focus();
+}
+
 function closeHelp() {
     document.getElementById('help-modal').classList.add('hidden');
+    document.getElementById('help-btn')?.focus();
 }
 
 // ===== EVENT LISTENERS =====
 document.getElementById('analyze-btn').addEventListener('click', fetchAndAnalyze);
+document.getElementById('video-url').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        fetchAndAnalyze();
+    }
+});
 castBtn.addEventListener('click', startCasting);
 stopBtn.addEventListener('click', stopCasting);
 deviceSelect.addEventListener('change', toggleManualInput);
@@ -992,9 +1006,22 @@ addStreamBtn.addEventListener('click', openComposeOverlay);
 
 document.querySelector('.compose-overlay-backdrop')?.addEventListener('click', closeComposeOverlay);
 
+document.getElementById('help-btn')?.addEventListener('click', openHelp);
 document.getElementById('help-close-btn')?.addEventListener('click', closeHelp);
 document.getElementById('help-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'help-modal') closeHelp();
+});
+
+// Global Escape: close whichever overlay is open (most transient first)
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const helpModal = document.getElementById('help-modal');
+    const overlay = document.getElementById('compose-overlay');
+    if (helpModal && !helpModal.classList.contains('hidden')) {
+        closeHelp();
+    } else if (overlay && !overlay.classList.contains('hidden')) {
+        closeComposeOverlay();
+    }
 });
 
 // PIN modal events

@@ -35,7 +35,14 @@
                 <span class="top-bar-title">HomeCast</span>
             </div>
             <div class="top-bar-meta">
-                <a href="https://github.com/simno/homecast" target="_blank">GitHub</a>
+                <button id="help-btn" class="icon-btn" type="button" title="How to use HomeCast" aria-label="Help">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </button>
+                <a href="https://github.com/simno/homecast" target="_blank" rel="noopener">GitHub</a>
                 <span class="version">v0.8.2</span>
             </div>
         </header>
@@ -103,12 +110,13 @@
                             <input type="checkbox" id="use-proxy" checked>
                             <span>
                                 Proxy Stream
-                                <span class="tooltip">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                <span class="tooltip" tabindex="0" role="button" aria-label="About proxy streaming">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <circle cx="12" cy="12" r="10"/>
-                                        <path d="M12 16v-4m0-4h.01" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                                        <line x1="12" y1="11" x2="12" y2="16"/>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"/>
                                     </svg>
-                                    <span class="tooltip-text">Recommended: Fixes CORS issues and enables HLS streaming</span>
+                                    <span class="tooltip-text" role="tooltip">Recommended: Fixes CORS issues and enables HLS streaming</span>
                                 </span>
                             </span>
                         </label>

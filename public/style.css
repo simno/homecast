@@ -247,6 +247,30 @@ body {
   color: var(--md-primary);
 }
 
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.icon-btn:hover {
+  background: rgba(168, 199, 250, 0.08);
+  color: var(--md-primary);
+}
+
+@media (prefers-color-scheme: light) {
+  .icon-btn:hover { background: rgba(26, 86, 184, 0.08); }
+}
+
 .version {
   color: var(--md-on-surface-secondary);
   font: var(--typescale-label-sm);
@@ -774,9 +798,15 @@ select:focus {
   border-top-color: var(--md-inverse-surface);
 }
 
-.tooltip:hover .tooltip-text {
+.tooltip:hover .tooltip-text,
+.tooltip:focus-visible .tooltip-text {
   visibility: visible;
   opacity: 1;
+}
+
+.tooltip:focus-visible {
+  outline: none;
+  color: var(--md-primary);
 }
 
 /* ===== STATUS CARD ===== */
@@ -1169,6 +1199,37 @@ select:focus {
 
 @keyframes ripple-anim {
   to { transform: scale(4); opacity: 0; }
+}
+
+/* ===== KEYBOARD FOCUS — visible focus rings for a11y ===== */
+button:focus-visible,
+select:focus-visible,
+.stream-pill:focus-visible,
+.top-bar-meta a:focus-visible,
+.modal-close:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+input[type="text"]:focus-visible {
+  outline: none;
+}
+
+.checkbox-label input:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+/* ===== REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ===== RESPONSIVE: Tablet ===== */
