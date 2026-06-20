@@ -18,7 +18,7 @@ const { validateProxyUrl } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
-const { resolveM3u8Url, tryNextSegment } = require('../lib/proxy');
+const { resolveM3u8Url, tryNextSegment, filterMasterPlaylist } = require('../lib/proxy');
 const { getBufferHealthStats } = require('../lib/stats');
 
 const router = express.Router();
@@ -89,6 +89,10 @@ setInterval(() => {
 // --- API: Proxy Stream ---
 router.get('/proxy', proxyLimiter, async (req, res) => {
     const { url, referer } = req.query;
+    // Quality cap for HLS master playlists. Absent/empty defaults to 'highest'
+    // so the highest available variant plays on every site unless the user
+    // explicitly picks another quality (or 'auto' for adaptive bitrate).
+    const quality = req.query.quality || 'highest';
     const clientIp = req.ip || req.connection.remoteAddress;
 
     console.log(`[Proxy] Request from ${clientIp} for: ${url?.substring(0, 80)}...`);
@@ -160,7 +164,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         // HLS Playlist - Check cache first
         if (url.includes('.m3u8') || url.includes('playlist')) {
-            const cacheKey = url;
+            // Quality is part of the key: the same upstream master URL yields
+            // different rewritten playlists per requested quality.
+            const cacheKey = `${url}|q=${quality}`;
             const cached = playlistCache.get(cacheKey);
 
             const cacheTTL = cached?.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
@@ -205,20 +211,26 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                     const originalM3u8 = Buffer.concat(chunks).toString('utf8');
                     const baseUrl = new URL(url);
 
-                    const isLive = !originalM3u8.includes('#EXT-X-ENDLIST');
+                    // Cap a master playlist to the requested quality (no-op for
+                    // media playlists and for quality=auto). Stats below are
+                    // parsed from the filtered playlist so they reflect what
+                    // actually plays.
+                    const filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
 
-                    const resolutionMatch = originalM3u8.match(/RESOLUTION=(\d+x\d+)/);
+                    const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
+
+                    const resolutionMatch = filteredM3u8.match(/RESOLUTION=(\d+x\d+)/);
                     if (resolutionMatch) {
                         stats.resolution = resolutionMatch[1];
                     } else if (!stats.resolution || stats.resolution === 'Unknown') {
                         stats.resolution = 'Live Stream';
                     }
 
-                    const bandwidthMatch = originalM3u8.match(/BANDWIDTH=(\d+)/);
+                    const bandwidthMatch = filteredM3u8.match(/BANDWIDTH=(\d+)/);
                     if (bandwidthMatch) {
                         stats.bitrate = Math.round(parseInt(bandwidthMatch[1]) / 1000);
                     } else if (!stats.bitrate || stats.bitrate === 0) {
-                        const targetDurationMatch = originalM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                        const targetDurationMatch = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
                         if (targetDurationMatch && stats.segmentCount > 0) {
                             const duration = (Date.now() - stats.startTime) / 1000;
                             if (duration > 10) {
@@ -227,7 +239,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                         }
                     }
 
-                    const frameRateMatch = originalM3u8.match(/FRAME-RATE=([\d.]+)/);
+                    const frameRateMatch = filteredM3u8.match(/FRAME-RATE=([\d.]+)/);
                     if (frameRateMatch && !stats.frameRate) {
                         stats.frameRate = parseFloat(frameRateMatch[1]);
                         console.log(`[Proxy] Detected frame rate from playlist: ${stats.frameRate} FPS`);
@@ -238,7 +250,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                             stats: { ...stats }
                         });
                     } else if (!stats.frameRate) {
-                        const targetDuration = originalM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                        const targetDuration = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
                         if (targetDuration && stats.segmentCount > 5) {
                             const segDuration = parseInt(targetDuration[1]);
                             if (segDuration <= 2) {
@@ -258,14 +270,16 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                         }
                     }
 
-                    const rewrittenM3u8 = originalM3u8.split('\n').map(line => {
+                    const rewrittenM3u8 = filteredM3u8.split('\n').map(line => {
                         const result = resolveM3u8Url(line, baseUrl);
 
                         if (!result.isUrl) {
                             return line;
                         }
 
-                        const proxyUrl = `http://${req.headers.host}/proxy?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer || '')}`;
+                        // Carry quality onto child playlist requests so variant
+                        // and segment fetches stay consistent (and cache cleanly).
+                        const proxyUrl = `http://${req.headers.host}/proxy?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer || '')}&quality=${encodeURIComponent(quality)}`;
                         return proxyUrl;
                     }).join('\n');
 

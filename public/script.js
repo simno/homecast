@@ -10,6 +10,8 @@ const stopBtn = document.getElementById('stop-btn');
 const statusText = document.getElementById('status-text');
 const statusCard = document.getElementById('status-card');
 const streamOptionsContainer = document.getElementById('stream-options');
+const qualitySelect = document.getElementById('quality-select');
+const qualitySelectRow = document.getElementById('quality-select-row');
 const statusSpinner = document.getElementById('status-spinner');
 const statusSuccess = document.getElementById('status-success');
 const statusError = document.getElementById('status-error');
@@ -498,7 +500,7 @@ async function submitPin() {
 
 function retryCastAfterPairing(params) {
     // Re-invoke start casting with the stored params
-    const { ip, url, proxy, referer, deviceType } = params;
+    const { ip, url, proxy, referer, deviceType, quality } = params;
     castBtn.disabled = true;
     updateStatus('Retrying cast after pairing...', 'loading');
 
@@ -508,7 +510,7 @@ function retryCastAfterPairing(params) {
             { 'Content-Type': 'application/json' },
             csrfToken ? { 'X-CSRF-Token': csrfToken } : {}
         ),
-        body: JSON.stringify({ ip, url, proxy, referer, deviceType })
+        body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
     }).then(r => r.json()).then(data => {
         if (data.error && data.needsPairing) {
             throw new Error(data.error);
@@ -809,12 +811,46 @@ function displayStreamOptions(videos) {
         if (!video.unsupported) {
             option.onclick = () => {
                 radio.checked = true;
+                populateQualityOptions(video);
                 checkReady();
             };
         }
 
         streamOptionsContainer.appendChild(option);
     });
+
+    // Populate the quality picker for the initially selected stream.
+    const firstSelectable = videos.find(v => !v.unsupported);
+    populateQualityOptions(firstSelectable || null);
+}
+
+// Build the quality dropdown for a stream. Defaults to "Highest available";
+// the server forces that variant unless the user picks a specific quality
+// (or "Auto" for adaptive bitrate). Hidden for non-HLS streams, which have
+// no selectable variants.
+function populateQualityOptions(video) {
+    if (!qualitySelect || !qualitySelectRow) return;
+
+    qualitySelect.innerHTML = '';
+
+    if (!video || video.type !== 'hls') {
+        qualitySelectRow.classList.add('hidden');
+        return;
+    }
+
+    const addOption = (value, label) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        qualitySelect.appendChild(opt);
+    };
+
+    addOption('highest', 'Highest available');
+    (video.qualities || []).forEach(q => addOption(q.value, q.label));
+    addOption('auto', 'Auto (adaptive)');
+
+    qualitySelect.value = 'highest';
+    qualitySelectRow.classList.remove('hidden');
 }
 
 // ===== CASTING =====
@@ -830,6 +866,9 @@ async function startCasting() {
     const referer = selectedStream.referer;
     const proxy = document.getElementById('use-proxy').checked;
     const deviceType = deviceSelect.selectedOptions[0]?.dataset?.type || 'chromecast';
+    const quality = (qualitySelectRow && !qualitySelectRow.classList.contains('hidden'))
+        ? qualitySelect.value
+        : 'highest';
 
     castBtn.disabled = true;
     updateStatus('Connecting to device...', 'loading');
@@ -840,7 +879,7 @@ async function startCasting() {
         const res = await fetch('/api/cast', {
             method: 'POST',
             headers: castHeaders,
-            body: JSON.stringify({ ip, url, proxy, referer, deviceType })
+            body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
         });
 
         const data = await res.json();
@@ -848,7 +887,7 @@ async function startCasting() {
         if (data.needsPairing) {
             // AirPlay device requires PIN pairing
             showPinPrompt(data.deviceIp, data.deviceName);
-            state.pairing.pendingCast = { ip, url, proxy, referer, deviceType };
+            state.pairing.pendingCast = { ip, url, proxy, referer, deviceType, quality };
             castBtn.disabled = false;
             return;
         }

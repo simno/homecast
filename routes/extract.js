@@ -3,7 +3,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const rateLimit = require('express-rate-limit');
 const { httpAgent, httpsAgent, USER_AGENT } = require('../lib/utils');
-const { searchIframesRecursively, detectResolution } = require('../lib/extraction');
+const { searchIframesRecursively, detectResolution, getHlsQualities } = require('../lib/extraction');
 const { isTwitchUrl, resolveTwitchStream } = require('../lib/twitch');
 
 let extractWithBrowser = null;
@@ -48,7 +48,11 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
     let videoReferer = url;
 
     try {
-        if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) return res.json({ videos: [{ url, referer: url }] });
+        if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) {
+            const directType = /\.m3u8$/i.test(url) ? 'hls' : 'mp4';
+            const qualities = directType === 'hls' ? await getHlsQualities(url) : [];
+            return res.json({ videos: [{ url, referer: url, type: directType, qualities }] });
+        }
 
         // Twitch exposes an og:video pointing at its HTML embed player, which the
         // generic scraper below would mis-classify as a playable MP4. Resolve the
@@ -56,7 +60,10 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         if (isTwitchUrl(url)) {
             const twitch = await resolveTwitchStream(url);
             if (twitch.status === 'ok') {
-                const resolution = await detectResolution(twitch.url, 'hls');
+                const qualities = await getHlsQualities(twitch.url);
+                const resolution = qualities.length > 0
+                    ? qualities[0].label
+                    : await detectResolution(twitch.url, 'hls');
                 console.log(`[Extract] Resolved Twitch HLS stream: ${twitch.url.substring(0, 80)}...`);
                 return res.json({
                     videos: [{
@@ -64,6 +71,7 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
                         referer: twitch.referer,
                         type: 'hls',
                         resolution,
+                        qualities,
                         unsupported: false
                     }]
                 });
@@ -178,13 +186,17 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
             const isMjpeg = resolvedUrl.match(/mjpe?g|jpg.*video/i);
             const type = isMjpeg ? 'mjpeg' : (resolvedUrl.includes('.m3u8') ? 'hls' : 'mp4');
 
-            const resolution = await detectResolution(resolvedUrl, type);
+            const qualities = type === 'hls' ? await getHlsQualities(resolvedUrl) : [];
+            const resolution = (type === 'hls' && qualities.length > 0)
+                ? qualities[0].label
+                : await detectResolution(resolvedUrl, type);
 
             videos.push({
                 url: resolvedUrl,
                 referer: videoReferer,
                 type: type,
                 resolution: resolution,
+                qualities,
                 unsupported: isMjpeg
             });
         }

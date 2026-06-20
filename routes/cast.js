@@ -18,6 +18,15 @@ function validateIp(ip) {
     return false;
 }
 
+// Normalize the requested quality to one the proxy understands:
+// 'highest' (default), 'auto', or a numeric height string like '1080'.
+function normalizeQuality(quality) {
+    if (quality === 'auto' || quality === 'highest') return quality;
+    const height = parseInt(quality, 10);
+    if (Number.isFinite(height) && height > 0 && height <= 4320) return String(height);
+    return 'highest';
+}
+
 function validateUrl(url) {
     if (!url || typeof url !== 'string') return false;
     try {
@@ -31,6 +40,7 @@ function validateUrl(url) {
 // --- API: Cast ---
 router.post('/api/cast', (req, res) => {
     const { ip, url, proxy, referer, deviceType } = req.body;
+    const quality = normalizeQuality(req.body.quality);
 
     if (!validateIp(ip)) {
         return res.status(400).json({ error: 'Invalid or missing IP address' });
@@ -41,10 +51,10 @@ router.post('/api/cast', (req, res) => {
 
     // Route to AirPlay or Chromecast based on device type
     if (deviceType === 'airplay' || (devices.get(ip)?.type === 'airplay')) {
-        return castToAirPlayDevice(ip, url, !!proxy, referer || '', res);
+        return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res);
     }
 
-    castToDevice(ip, url, !!proxy, referer || '', res);
+    castToDevice(ip, url, !!proxy, referer || '', quality, res);
 });
 
 // --- API: Get Session State ---
