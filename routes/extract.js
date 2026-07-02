@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const { httpAgent, httpsAgent, USER_AGENT } = require('../lib/utils');
 const { searchIframesRecursively, detectResolution, getHlsQualities } = require('../lib/extraction');
 const { isTwitchUrl, resolveTwitchStream } = require('../lib/twitch');
+const { validateProxyUrl, safeLookup } = require('../lib/security');
 
 let extractWithBrowser = null;
 function getBrowserExtractor() {
@@ -43,6 +44,17 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         }
     } catch {
         return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Security: Validate URL for SSRF protection (same check used by /proxy)
+    const validation = await validateProxyUrl(url);
+    if (!validation.valid) {
+        console.warn(`[Security] Blocked extract request: ${validation.reason}`);
+        return res.status(403).json({
+            error: 'URL blocked by security policy',
+            reason: validation.reason,
+            note: 'Set DISABLE_SSRF_PROTECTION=true to disable (not recommended for public deployments)'
+        });
     }
 
     let videoReferer = url;
@@ -87,6 +99,7 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
             headers: { 'User-Agent': USER_AGENT },
             httpAgent: httpAgent,
             httpsAgent: httpsAgent,
+            lookup: safeLookup,
             timeout: 10000
         });
         const $ = cheerio.load(data);

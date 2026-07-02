@@ -447,6 +447,12 @@ body {
 
 .field-label:first-of-type { margin-top: 0; }
 
+.field-hint {
+  font: var(--typescale-label-sm);
+  color: var(--danger);
+  margin-top: 6px;
+}
+
 .quality-row {
   margin-top: 16px;
 }
@@ -1286,11 +1292,11 @@ input[type="text"]:focus-visible {
   }
 
   .graph-y-labels {
-    min-width: 44px;
-    font-size: 0.58rem;
+    min-width: 40px;
+    font-size: 0.7rem;
   }
 
-  .graph-x-labels { padding-left: 52px; }
+  .graph-x-labels { padding-left: 48px; }
 
   .compose-card { padding: 20px; }
 

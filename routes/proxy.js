@@ -14,7 +14,7 @@ const {
     CACHE_TTL_LIVE,
     USER_AGENT
 } = require('../lib/utils');
-const { validateProxyUrl } = require('../lib/security');
+const { validateProxyUrl, safeLookup } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
@@ -32,6 +32,9 @@ const proxyLimiter = rateLimit({
 });
 
 async function fetchUpstream(url, headers, axiosConfig) {
+    // Security: pin DNS resolution at connect time so a rebinding attack can't
+    // swap in a private IP after validateProxyUrl() already approved this URL.
+    axiosConfig = { ...axiosConfig, lookup: safeLookup };
     try {
         const response = await axios({ ...axiosConfig, url, headers });
         if (response.status === 401 || response.status === 403) {
@@ -57,6 +60,68 @@ async function fetchUpstream(url, headers, axiosConfig) {
 }
 
 const MAX_CACHE_SIZE = 100;
+
+// In-flight upstream playlist fetches, keyed the same as playlistCache.
+// Prevents a "cache stampede": several requests for the same url|quality
+// arriving within a few ms of each other (common when an HLS client and a
+// dashboard preview hit the same manifest) would otherwise all miss the
+// cache and each trigger their own upstream fetch. Concurrent callers await
+// the same promise instead.
+const inFlightPlaylistFetches = new Map();
+
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer) {
+    if (inFlightPlaylistFetches.has(cacheKey)) {
+        return inFlightPlaylistFetches.get(cacheKey);
+    }
+
+    const promise = (async () => {
+        const response = await fetchUpstream(url, headers, {
+            method: 'get',
+            responseType: 'stream',
+            httpAgent: httpAgent,
+            httpsAgent: httpsAgent,
+            timeout: 30000,
+            validateStatus: (status) => status < 500
+        });
+
+        if (response.status >= 400) {
+            return { ok: false, status: response.status };
+        }
+
+        const chunks = await new Promise((resolve, reject) => {
+            const collected = [];
+            response.data.on('data', chunk => collected.push(chunk));
+            response.data.on('error', reject);
+            response.data.on('end', () => resolve(collected));
+        });
+
+        const originalM3u8 = Buffer.concat(chunks).toString('utf8');
+        const baseUrl = new URL(url);
+        const filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
+        const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
+
+        const rewrittenM3u8 = filteredM3u8.split('\n').map(line => {
+            const result = resolveM3u8Url(line, baseUrl);
+            if (!result.isUrl) return line;
+
+            // Carry quality onto child playlist requests so variant and
+            // segment fetches stay consistent (and cache cleanly).
+            return `http://${req.headers.host}/proxy?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer || '')}&quality=${encodeURIComponent(quality)}`;
+        }).join('\n');
+
+        playlistCache.set(cacheKey, {
+            content: rewrittenM3u8,
+            timestamp: Date.now(),
+            isLive: isLive
+        });
+
+        return { ok: true, filteredM3u8, rewrittenM3u8, isLive };
+    })();
+
+    inFlightPlaylistFetches.set(cacheKey, promise);
+    promise.finally(() => inFlightPlaylistFetches.delete(cacheKey));
+    return promise;
+}
 
 // Clean up expired and excess playlist cache entries every 2 minutes
 setInterval(() => {
@@ -186,119 +251,75 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const response = await fetchUpstream(url, headers, {
-                method: 'get',
-                responseType: 'stream',
-                httpAgent: httpAgent,
-                httpsAgent: httpsAgent,
-                timeout: 30000,
-                validateStatus: (status) => status < 500
-            });
+            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer);
 
-            if (response.status >= 400) {
-                console.error(`[Proxy] Upstream returned ${response.status} for ${url}`);
-                return res.status(response.status).json({ error: `Upstream error: ${response.status}` });
+            if (!result.ok) {
+                console.error(`[Proxy] Upstream returned ${result.status} for ${url}`);
+                return res.status(result.status).json({ error: `Upstream error: ${result.status}` });
             }
 
-            const chunks = [];
-            response.data.on('data', chunk => chunks.push(chunk));
-            response.data.on('error', (err) => {
-                console.error('[Proxy] Stream error:', err);
-                if (!res.headersSent) res.status(500).end();
-            });
-            response.data.on('end', () => {
-                try {
-                    const originalM3u8 = Buffer.concat(chunks).toString('utf8');
-                    const baseUrl = new URL(url);
+            const { filteredM3u8, rewrittenM3u8, isLive } = result;
 
-                    // Cap a master playlist to the requested quality (no-op for
-                    // media playlists and for quality=auto). Stats below are
-                    // parsed from the filtered playlist so they reflect what
-                    // actually plays.
-                    const filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
+            // Cap a master playlist to the requested quality (no-op for media
+            // playlists and for quality=auto). Stats below are parsed from the
+            // filtered playlist so they reflect what actually plays. Applied
+            // per-request (even when the fetch above was shared with a
+            // concurrent caller) so every requesting device's stats stay accurate.
+            const resolutionMatch = filteredM3u8.match(/RESOLUTION=(\d+x\d+)/);
+            if (resolutionMatch) {
+                stats.resolution = resolutionMatch[1];
+            } else if (!stats.resolution || stats.resolution === 'Unknown') {
+                stats.resolution = 'Live Stream';
+            }
 
-                    const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
-
-                    const resolutionMatch = filteredM3u8.match(/RESOLUTION=(\d+x\d+)/);
-                    if (resolutionMatch) {
-                        stats.resolution = resolutionMatch[1];
-                    } else if (!stats.resolution || stats.resolution === 'Unknown') {
-                        stats.resolution = 'Live Stream';
+            const bandwidthMatch = filteredM3u8.match(/BANDWIDTH=(\d+)/);
+            if (bandwidthMatch) {
+                stats.bitrate = Math.round(parseInt(bandwidthMatch[1]) / 1000);
+            } else if (!stats.bitrate || stats.bitrate === 0) {
+                const targetDurationMatch = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                if (targetDurationMatch && stats.segmentCount > 0) {
+                    const duration = (Date.now() - stats.startTime) / 1000;
+                    if (duration > 10) {
+                        stats.bitrate = Math.round((stats.totalBytes * 8) / duration / 1000);
                     }
+                }
+            }
 
-                    const bandwidthMatch = filteredM3u8.match(/BANDWIDTH=(\d+)/);
-                    if (bandwidthMatch) {
-                        stats.bitrate = Math.round(parseInt(bandwidthMatch[1]) / 1000);
-                    } else if (!stats.bitrate || stats.bitrate === 0) {
-                        const targetDurationMatch = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
-                        if (targetDurationMatch && stats.segmentCount > 0) {
-                            const duration = (Date.now() - stats.startTime) / 1000;
-                            if (duration > 10) {
-                                stats.bitrate = Math.round((stats.totalBytes * 8) / duration / 1000);
-                            }
-                        }
+            const frameRateMatch = filteredM3u8.match(/FRAME-RATE=([\d.]+)/);
+            if (frameRateMatch && !stats.frameRate) {
+                stats.frameRate = parseFloat(frameRateMatch[1]);
+                console.log(`[Proxy] Detected frame rate from playlist: ${stats.frameRate} FPS`);
+                broadcast({
+                    type: 'streamStats',
+                    deviceIp: deviceIp,
+                    bufferHealth: getBufferHealthStats(deviceIp),
+                    stats: { ...stats }
+                });
+            } else if (!stats.frameRate) {
+                const targetDuration = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
+                if (targetDuration && stats.segmentCount > 5) {
+                    const segDuration = parseInt(targetDuration[1]);
+                    if (segDuration <= 2) {
+                        stats.frameRate = 60;
+                    } else if (segDuration >= 3 && segDuration <= 10) {
+                        stats.frameRate = 30;
                     }
-
-                    const frameRateMatch = filteredM3u8.match(/FRAME-RATE=([\d.]+)/);
-                    if (frameRateMatch && !stats.frameRate) {
-                        stats.frameRate = parseFloat(frameRateMatch[1]);
-                        console.log(`[Proxy] Detected frame rate from playlist: ${stats.frameRate} FPS`);
+                    if (stats.frameRate) {
+                        console.log(`[Proxy] Estimated frame rate: ${stats.frameRate} FPS (based on segment duration: ${segDuration}s)`);
                         broadcast({
                             type: 'streamStats',
                             deviceIp: deviceIp,
                             bufferHealth: getBufferHealthStats(deviceIp),
                             stats: { ...stats }
                         });
-                    } else if (!stats.frameRate) {
-                        const targetDuration = filteredM3u8.match(/#EXT-X-TARGETDURATION:(\d+)/);
-                        if (targetDuration && stats.segmentCount > 5) {
-                            const segDuration = parseInt(targetDuration[1]);
-                            if (segDuration <= 2) {
-                                stats.frameRate = 60;
-                            } else if (segDuration >= 3 && segDuration <= 10) {
-                                stats.frameRate = 30;
-                            }
-                            if (stats.frameRate) {
-                                console.log(`[Proxy] Estimated frame rate: ${stats.frameRate} FPS (based on segment duration: ${segDuration}s)`);
-                                broadcast({
-                                    type: 'streamStats',
-                                    deviceIp: deviceIp,
-                                    bufferHealth: getBufferHealthStats(deviceIp),
-                                    stats: { ...stats }
-                                });
-                            }
-                        }
                     }
-
-                    const rewrittenM3u8 = filteredM3u8.split('\n').map(line => {
-                        const result = resolveM3u8Url(line, baseUrl);
-
-                        if (!result.isUrl) {
-                            return line;
-                        }
-
-                        // Carry quality onto child playlist requests so variant
-                        // and segment fetches stay consistent (and cache cleanly).
-                        const proxyUrl = `http://${req.headers.host}/proxy?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer || '')}&quality=${encodeURIComponent(quality)}`;
-                        return proxyUrl;
-                    }).join('\n');
-
-                    playlistCache.set(cacheKey, {
-                        content: rewrittenM3u8,
-                        timestamp: Date.now(),
-                        isLive: isLive
-                    });
-
-                    console.log(`[Proxy] Cached as ${isLive ? 'LIVE' : 'VOD'} stream (TTL: ${isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD}ms)`);
-
-                    res.set('Content-Type', contentType);
-                    res.send(rewrittenM3u8);
-                } catch (err) {
-                    console.error('[Proxy] M3U8 rewrite error:', err);
-                    if (!res.headersSent) res.status(500).json({ error: 'Failed to rewrite playlist' });
                 }
-            });
-            return;
+            }
+
+            console.log(`[Proxy] Serving ${isLive ? 'LIVE' : 'VOD'} playlist (TTL: ${isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD}ms): ${url.substring(0, 80)}...`);
+
+            res.set('Content-Type', contentType);
+            return res.send(rewrittenM3u8);
         }
 
         // Standard Binary Stream (Segments, MP4, etc.) - No caching
@@ -311,13 +332,35 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         let segmentSkipped = false;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            // The 4s error budget below is only checked *after* an attempt
+            // fails, but each attempt otherwise gets a 30s axios timeout — a
+            // single slow-but-responsive upstream could blow well past the
+            // documented recovery window before that check ever runs. Cap
+            // each attempt's own timeout to whatever's left of the budget.
+            if (isVideoSegment && attempt > 0) {
+                const remaining = 4000 - (Date.now() - retryStartTime);
+                if (remaining <= 0) {
+                    console.warn(`[Proxy] Skipping segment, retry budget exhausted: ${currentUrl.substring(currentUrl.lastIndexOf('/') + 1, 80)}...`);
+                    res.status(200);
+                    res.set('Content-Type', 'video/mp2t');
+                    res.set('Content-Length', '0');
+                    return res.end();
+                }
+            }
+            // Attempt 0 keeps the full 30s timeout so a legitimately slow (but
+            // successful) upstream isn't punished; only retries are budgeted,
+            // since those exist purely to recover from failures quickly.
+            const attemptTimeout = (isVideoSegment && attempt > 0)
+                ? Math.max(500, Math.min(30000, 4000 - (Date.now() - retryStartTime)))
+                : 30000;
+
             try {
                 response = await fetchUpstream(currentUrl, headers, {
                     method: 'get',
                     responseType: 'stream',
                     httpAgent: httpAgent,
                     httpsAgent: httpsAgent,
-                    timeout: 30000,
+                    timeout: attemptTimeout,
                     validateStatus: (status) => status < 500
                 });
 
@@ -386,6 +429,13 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         res.set(response.headers);
         res.removeHeader('content-length');
+
+        // .pipe() below does not destroy its source when the destination
+        // closes unexpectedly, so an aborting client (e.g. a channel change
+        // mid-segment) would otherwise leak the upstream socket.
+        res.on('close', () => {
+            if (!res.writableEnded) response.data.destroy();
+        });
 
         stats.segmentCount++;
         let segmentBytes = 0;

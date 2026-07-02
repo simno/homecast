@@ -31,6 +31,17 @@ const pinTitle = document.getElementById('pin-title');
 // ===== STATE =====
 const MAX_HISTORY = 60;
 
+// Text alternative for the pill health dot, which otherwise communicates
+// stream health via color alone.
+const HEALTH_LABELS = {
+    healthy: 'Connected',
+    stale: 'No data received',
+    degraded: 'Connection unstable',
+    unhealthy: 'Connection lost',
+    reconnecting: 'Reconnecting...',
+    failed: 'Connection failed'
+};
+
 const state = {
     mode: 'setup',              // 'setup' | 'dashboard'
     devices: [],                // from WebSocket
@@ -222,6 +233,8 @@ function resetComposeForm() {
     streamOptionsContainer.innerHTML = '';
     statusCard.classList.add('hidden');
     castBtn.disabled = true;
+    const castBtnLabel = document.getElementById('cast-btn-label');
+    if (castBtnLabel) castBtnLabel.textContent = 'Start Casting';
     state.compose.analyzedStreams = [];
     state.compose.status = null;
 }
@@ -240,6 +253,7 @@ function renderStreamBar() {
 
         const dot = document.createElement('span');
         dot.className = `pill-dot${stream.health !== 'healthy' ? ' ' + stream.health : ''}`;
+        dot.title = HEALTH_LABELS[stream.health] || stream.health;
 
         const name = document.createElement('span');
         name.textContent = stream.deviceName;
@@ -250,7 +264,7 @@ function renderStreamBar() {
         closeBtn.title = 'Stop stream';
         closeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            stopStreamByIp(ip);
+            stopStreamByIp(ip, closeBtn);
         });
 
         pill.appendChild(dot);
@@ -382,15 +396,7 @@ function updateConnectionHealthUI(healthState) {
     // Map 'stale' to the 'degraded' CSS class for the yellow dot
     if (healthState === 'stale') dot.classList.add('degraded');
 
-    const messages = {
-        healthy: 'Connected',
-        stale: 'No data received',
-        degraded: 'Connection unstable',
-        unhealthy: 'Connection lost',
-        reconnecting: 'Reconnecting...',
-        failed: 'Connection failed'
-    };
-    text.textContent = messages[healthState] || 'Connected';
+    text.textContent = HEALTH_LABELS[healthState] || 'Connected';
 }
 
 // ===== COMPOSE OVERLAY =====
@@ -498,44 +504,61 @@ async function submitPin() {
     }
 }
 
-function retryCastAfterPairing(params) {
-    // Re-invoke start casting with the stored params
+// Shared by startCasting() and retryCastAfterPairing() — both POST the same
+// params to /api/cast and handle the same needsPairing/error/success shapes,
+// so a fix to one path can't silently miss the other.
+async function performCast(params, { loadingMessage, allowPairingRetry }) {
     const { ip, url, proxy, referer, deviceType, quality } = params;
-    castBtn.disabled = true;
-    updateStatus('Retrying cast after pairing...', 'loading');
 
-    fetch('/api/cast', {
-        method: 'POST',
-        headers: Object.assign(
-            { 'Content-Type': 'application/json' },
-            csrfToken ? { 'X-CSRF-Token': csrfToken } : {}
-        ),
-        body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
-    }).then(r => r.json()).then(data => {
-        if (data.error && data.needsPairing) {
-            throw new Error(data.error);
-        }
-        if (data.error && data.troubleshooting) {
-            updateStatus(`Cast failed: ${data.error}`, 'error');
+    const castBtnLabel = document.getElementById('cast-btn-label');
+    castBtn.disabled = true;
+    if (castBtnLabel) castBtnLabel.textContent = 'Casting…';
+    updateStatus(loadingMessage, 'loading');
+
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+        const res = await fetch('/api/cast', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
+        });
+
+        const data = await res.json();
+
+        if (data.needsPairing && allowPairingRetry) {
+            showPinPrompt(data.deviceIp, data.deviceName);
+            state.pairing.pendingCast = params;
             castBtn.disabled = false;
-        } else if (data.error) {
-            throw new Error(data.error);
-        } else {
-            const deviceName = findDeviceName(ip);
-            const dt = state.devices.find(d => d.ip === ip)?.type || 'chromecast';
-            createStreamEntry(ip, deviceName, dt);
-            state.activeStreamIp = ip;
-            renderStreamBar();
-            closeComposeOverlay();
-            setMode('dashboard');
-            updateStatus('Casting started!', 'success');
-            saveState();
+            if (castBtnLabel) castBtnLabel.textContent = 'Start Casting';
+            return;
         }
-    }).catch(e => {
-        console.error('Retry cast error:', e);
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        const deviceName = findDeviceName(ip);
+        const dt = state.devices.find(d => d.ip === ip)?.type
+            || deviceSelect.selectedOptions[0]?.dataset?.type
+            || 'chromecast';
+        createStreamEntry(ip, deviceName, dt);
+        state.activeStreamIp = ip;
+        renderStreamBar();
+        closeComposeOverlay();
+        setMode('dashboard');
+        updateStatus('Casting started!', 'success');
+        saveState();
+    } catch (e) {
+        console.error('Cast error:', e);
         updateStatus(`Cast failed: ${e.message}`, 'error');
         castBtn.disabled = false;
-    });
+        if (castBtnLabel) castBtnLabel.textContent = 'Start Casting';
+    }
+}
+
+function retryCastAfterPairing(params) {
+    performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false });
 }
 
 // ===== WEBSOCKET =====
@@ -543,7 +566,13 @@ const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const ws = new WebSocket(`${protocol}//${window.location.host}`);
 
 ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+    let data;
+    try {
+        data = JSON.parse(event.data);
+    } catch (e) {
+        console.error('[WebSocket] Failed to parse message:', e);
+        return;
+    }
 
     if (data.type === 'devices') {
         state.devices = data.devices;
@@ -637,6 +666,7 @@ ws.onmessage = (event) => {
                 const dot = pill.querySelector('.pill-dot');
                 if (dot) {
                     dot.className = `pill-dot${data.state !== 'healthy' ? ' ' + data.state : ''}`;
+                    dot.title = HEALTH_LABELS[data.state] || data.state;
                 }
             }
             // Update dashboard if active
@@ -717,13 +747,26 @@ function toggleManualInput() {
     checkReady();
 }
 
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
+
 function checkReady() {
-    const ip = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
+    const isManual = deviceSelect.value === 'manual';
+    const ip = isManual ? manualIpInput.value.trim() : deviceSelect.value;
     const selectedStream = document.querySelector('input[name="stream-select"]:checked');
-    castBtn.disabled = !(ip && selectedStream);
+
+    const manualIpHint = document.getElementById('manual-ip-hint');
+    const manualIpValid = !isManual || ip === '' || IPV4_RE.test(ip);
+    if (manualIpHint) manualIpHint.classList.toggle('hidden', manualIpValid);
+
+    const ipReady = isManual ? IPV4_RE.test(ip) : Boolean(ip);
+    castBtn.disabled = !(ipReady && selectedStream);
 }
 
+const analyzeBtn = document.getElementById('analyze-btn');
+
 async function fetchAndAnalyze() {
+    if (analyzeBtn.disabled) return; // already analyzing, ignore duplicate clicks
+
     const url = document.getElementById('video-url').value.trim();
     if (!url) {
         statusCard.classList.remove('hidden');
@@ -732,6 +775,7 @@ async function fetchAndAnalyze() {
         return;
     }
 
+    analyzeBtn.disabled = true;
     updateStatus('Analyzing URL...', 'loading');
     statusCard.classList.remove('hidden');
 
@@ -746,17 +790,28 @@ async function fetchAndAnalyze() {
 
         const data = await res.json();
 
-        if (data.videos && data.videos.length > 0) {
+        const playableCount = data.videos ? data.videos.filter(v => !v.unsupported).length : 0;
+
+        if (playableCount > 0) {
             state.compose.analyzedStreams = data.videos;
             displayStreamOptions(data.videos);
-            updateStatus(`Found ${data.videos.length} stream${data.videos.length > 1 ? 's' : ''}`, 'success');
+            updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}`, 'success');
             checkReady();
+        } else if (data.videos && data.videos.length > 0) {
+            // Streams were found but none are playable (e.g. MJPEG only) —
+            // don't report this as a success, or the user is left staring
+            // at a disabled Cast button with no idea why.
+            state.compose.analyzedStreams = data.videos;
+            displayStreamOptions(data.videos);
+            updateStatus('Found a stream, but its format is not supported for casting', 'error');
         } else {
             updateStatus(data.error || 'No video found at this URL', 'error');
         }
     } catch (e) {
         console.error('Extract error:', e);
         updateStatus('Failed to analyze URL', 'error');
+    } finally {
+        analyzeBtn.disabled = false;
     }
 }
 
@@ -857,6 +912,8 @@ function populateQualityOptions(video) {
 
 // ===== CASTING =====
 async function startCasting() {
+    if (castBtn.disabled) return; // already casting, ignore duplicate clicks
+
     const ip = deviceSelect.value === 'manual' ? manualIpInput.value.trim() : deviceSelect.value;
     const selectedRadio = document.querySelector('input[name="stream-select"]:checked');
 
@@ -872,59 +929,19 @@ async function startCasting() {
         ? qualitySelect.value
         : 'highest';
 
-    castBtn.disabled = true;
-    updateStatus('Connecting to device...', 'loading');
-
-    try {
-        const castHeaders = { 'Content-Type': 'application/json' };
-        if (csrfToken) castHeaders['X-CSRF-Token'] = csrfToken;
-        const res = await fetch('/api/cast', {
-            method: 'POST',
-            headers: castHeaders,
-            body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
-        });
-
-        const data = await res.json();
-
-        if (data.needsPairing) {
-            // AirPlay device requires PIN pairing
-            showPinPrompt(data.deviceIp, data.deviceName);
-            state.pairing.pendingCast = { ip, url, proxy, referer, deviceType, quality };
-            castBtn.disabled = false;
-            return;
-        }
-
-        if (data.error) {
-            throw new Error(data.error);
-        }
-
-        if (data.troubleshooting) {
-            updateStatus(`Cast failed: ${data.error}`, 'error');
-            console.error('Troubleshooting:', data.troubleshooting);
-            castBtn.disabled = false;
-        } else {
-            // Success: create stream entry and transition to dashboard
-            const deviceName = findDeviceName(ip);
-            const dt = deviceSelect.selectedOptions[0]?.dataset?.type || 'chromecast';
-            createStreamEntry(ip, deviceName, dt);
-            state.activeStreamIp = ip;
-            renderStreamBar();
-
-            // Close overlay if open, then switch to dashboard
-            closeComposeOverlay();
-            setMode('dashboard');
-
-            updateStatus('Casting started!', 'success');
-            saveState();
-        }
-    } catch (e) {
-        console.error('Cast error:', e);
-        updateStatus(`Cast failed: ${e.message}`, 'error');
-        castBtn.disabled = false;
-    }
+    await performCast({ ip, url, proxy, referer, deviceType, quality }, {
+        loadingMessage: 'Connecting to device...',
+        allowPairingRetry: true
+    });
 }
 
-async function stopStreamByIp(ip) {
+const stoppingIps = new Set();
+
+async function stopStreamByIp(ip, closeBtn) {
+    if (stoppingIps.has(ip)) return; // already stopping, ignore duplicate clicks
+    stoppingIps.add(ip);
+    if (closeBtn) closeBtn.disabled = true;
+
     try {
         const stopHeaders = { 'Content-Type': 'application/json' };
         if (csrfToken) stopHeaders['X-CSRF-Token'] = csrfToken;
@@ -943,6 +960,10 @@ async function stopStreamByIp(ip) {
         }
     } catch (err) {
         console.error('Failed to stop:', err.message);
+    } finally {
+        stoppingIps.delete(ip);
+        // closeBtn may already be gone if removeStreamEntry re-rendered the bar
+        if (closeBtn && closeBtn.isConnected) closeBtn.disabled = false;
     }
 }
 
@@ -1012,12 +1033,17 @@ document.getElementById('help-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'help-modal') closeHelp();
 });
 
-// Global Escape: close whichever overlay is open (most transient first)
+// Global Escape: close whichever overlay is open (most transient first).
+// The PIN modal has its own Escape handler on #pin-input, but that only
+// fires when focus is inside the input — this covers focus being on the
+// modal's other controls (Cancel/Pair/close button).
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     const helpModal = document.getElementById('help-modal');
     const overlay = document.getElementById('compose-overlay');
-    if (helpModal && !helpModal.classList.contains('hidden')) {
+    if (pinModal && !pinModal.classList.contains('hidden')) {
+        hidePinPrompt();
+    } else if (helpModal && !helpModal.classList.contains('hidden')) {
         closeHelp();
     } else if (overlay && !overlay.classList.contains('hidden')) {
         closeComposeOverlay();
@@ -1054,9 +1080,19 @@ window.addEventListener('load', async () => {
 
             // Wait a moment for device list to arrive via WebSocket
             setTimeout(async () => {
+                // Check every saved stream's session concurrently — sequential
+                // awaits here would add one round-trip of latency per stream
+                // to the restore, which is especially noticeable with several
+                // saved streams.
+                const sessions = await Promise.all(
+                    savedState.activeStreams.map(async (saved) => ({
+                        saved,
+                        session: await checkSessionStatus(saved.ip)
+                    }))
+                );
+
                 let anyActive = false;
-                for (const { ip, deviceName, deviceType } of savedState.activeStreams) {
-                    const session = await checkSessionStatus(ip);
+                for (const { saved: { ip, deviceName, deviceType }, session } of sessions) {
                     if (session.active) {
                         const name = findDeviceName(ip) || deviceName || ip;
                         createStreamEntry(ip, name, deviceType || 'chromecast');
@@ -1122,7 +1158,10 @@ setInterval(() => {
             const pill = streamBar.querySelector(`.stream-pill[data-ip="${ip}"]`);
             if (pill) {
                 const dot = pill.querySelector('.pill-dot');
-                if (dot) dot.className = 'pill-dot degraded';
+                if (dot) {
+                    dot.className = 'pill-dot degraded';
+                    dot.title = HEALTH_LABELS.stale;
+                }
             }
             // Update dashboard if active
             if (ip === state.activeStreamIp) {

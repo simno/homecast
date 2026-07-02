@@ -74,7 +74,8 @@
 
                     <div id="manual-ip-container" class="manual-ip-box hidden">
                         <label for="manual-ip">Device IP Address:</label>
-                        <input type="text" id="manual-ip" placeholder="e.g., 192.168.1.50">
+                        <input type="text" id="manual-ip" placeholder="e.g., 192.168.1.50" inputmode="numeric" autocomplete="off">
+                        <div id="manual-ip-hint" class="field-hint hidden">Enter a valid IPv4 address (e.g., 192.168.1.50)</div>
                     </div>
 
                     <!-- URL + Analyze -->
@@ -125,7 +126,7 @@
                                 <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
                                 <polyline points="17 2 12 7 7 2"/>
                             </svg>
-                            Start Casting
+                            <span id="cast-btn-label">Start Casting</span>
                         </button>
                     </div>
 
@@ -146,7 +147,7 @@
                                 <line x1="9" y1="9" x2="15" y2="15"/>
                             </svg>
                         </div>
-                        <div class="status-bar" id="status-text">Ready</div>
+                        <div class="status-bar" id="status-text" aria-live="polite">Ready</div>
                     </div>
                 </div>
             </section>
@@ -160,7 +161,7 @@
                             <h2 id="dashboard-device-name">Device</h2>
                             <div class="health-indicator" id="connection-health">
                                 <span class="health-dot" id="health-dot"></span>
-                                <span class="health-text" id="health-text">Connected</span>
+                                <span class="health-text" id="health-text" aria-live="polite">Connected</span>
                             </div>
                         </div>
                         <button id="stop-btn" class="btn-danger-sm">
@@ -252,17 +253,17 @@
     </div>
 
     <!-- PIN Pairing Modal -->
-    <div id="pin-modal" class="modal hidden">
+    <div id="pin-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pin-title">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="pin-title">Enter AirPlay PIN</h2>
-                <button class="modal-close" id="pin-close-btn">&times;</button>
+                <button class="modal-close" id="pin-close-btn" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
                 <p>Enter the PIN code displayed on your <strong id="pin-device-name">Apple TV</strong>:</p>
                 <input type="text" id="pin-input" class="pin-input-field" maxlength="8" pattern="[0-9]*" inputmode="numeric"
                        autocomplete="off" placeholder="1234">
-                <div id="pin-status" class="pin-status hidden"></div>
+                <div id="pin-status" class="pin-status hidden" aria-live="polite"></div>
                 <div class="pin-actions">
                     <button id="pin-cancel-btn" class="btn-secondary" style="flex: 1;">Cancel</button>
                     <button id="pin-submit-btn" class="btn-primary" style="flex: 2;" disabled>Pair</button>
@@ -271,11 +272,11 @@
         </div>
     </div>
 
-    <div id="help-modal" class="modal hidden">
+    <div id="help-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>How to Use HomeCast</h2>
-                <button class="modal-close" id="help-close-btn">&times;</button>
+                <h2 id="help-title">How to Use HomeCast</h2>
+                <button class="modal-close" id="help-close-btn" aria-label="Close">&times;</button>
             </div>
             <div class="modal-body">
                 <h3>Quick Start</h3>
