@@ -184,7 +184,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         console.log(`[Proxy] No device mapping found for ${clientIp}, using as device IP`);
     }
 
-    updateHeartbeat(deviceIp);
+    updateHeartbeat(deviceIp, 'media');
     trackStreamActivity(deviceIp);
 
     if (!streamStats.has(deviceIp)) {
