@@ -1,0 +1,64 @@
+version: 2
+
+updates:
+  # npm dependencies
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    # Batch low-risk updates into two PRs to keep review noise down.
+    # Majors are deliberately excluded so they arrive as individual PRs
+    # and get reviewed on their own (see typescript 6 -> 7).
+    groups:
+      production-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+      development-minor-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    # No ignore list: protobufjs and semver are pinned via "overrides" and are
+    # not direct deps, so they produce no version-update noise. Leaving them
+    # un-ignored keeps Dependabot's security alerts for those transitive
+    # packages, which is how the castv2-client -> protobufjs 6.x RCE chain
+    # would have surfaced automatically.
+
+  # GitHub Actions used by the test and docker workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    labels:
+      - dependencies
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+
+  # Base image in the Dockerfile (node:26)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    labels:
+      - dependencies
+    commit-message:
+      prefix: docker
