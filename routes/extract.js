@@ -136,30 +136,32 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         }
 
         if (foundVideos.size === 0) {
-            // Detect SPAs: modern frameworks that render video players client-side.
-            // Drop the tight size limit — many SPAs serve large initial HTML via SSR.
-            const isSpa = (
-                data.includes('id="root"') ||
-                data.includes('id="app"') ||
-                data.includes('id="__next"') ||
-                data.includes('id="__nuxt"') ||
-                data.includes('data-reactroot') ||
-                data.includes('data-react-root') ||
-                data.includes('ng-app') ||
-                data.includes('ng-version') ||
-                data.includes('data-v-') ||
-                data.includes('__NEXT_DATA__') ||
-                data.includes('window.__NUXT__') ||
-                data.includes('window.__INITIAL_STATE__') ||
-                data.includes('_next/static') ||
-                // Streaming sites that render players client-side
-                data.includes('player.twitch.tv') ||
-                data.includes('/js/twitch') ||
-                data.includes('kraken')  // Twitch API bootstrap
-            );
+            // Nothing in the static HTML. Two fallbacks, cheapest first.
+            //
+            // This used to pick exactly one of them based on a hand-maintained list of
+            // framework marker strings ("does the HTML say __NEXT_DATA__/ng-version/..."),
+            // which failed two ways: a shell whose framework wasn't on the list never
+            // reached the browser at all (Angular's bare <app-root>, e.g. spacex.com),
+            // and whichever fallback was chosen never fell through to the other. So the
+            // list is gone — the routing is now structural, and the browser is the
+            // universal last resort rather than a special case.
 
-            if (isSpa) {
-                console.log('[Extract] SPA detected, trying headless browser...');
+            // Literal iframes are the signal that plain HTTP recursion can pay off: it
+            // follows embed chains for the cost of a few fetches. Without them there is
+            // nothing to recurse into, and going straight to the browser skips pulling
+            // down JS bundles that will not contain a video URL anyway.
+            if (/<iframe/i.test(data)) {
+                const result = await searchIframesRecursively(url, data, url, 0);
+                if (result) {
+                    foundVideos.add(result.videoUrl);
+                    videoReferer = result.referer;
+                }
+            }
+
+            // Anything that renders its player client-side only becomes visible once the
+            // page actually runs, so a script-bearing page is always worth a browser pass.
+            if (foundVideos.size === 0 && /<script/i.test(data)) {
+                console.log('[Extract] No video in static HTML, trying headless browser...');
                 const browserExtract = getBrowserExtractor();
                 if (browserExtract) {
                     const browserVideos = await browserExtract(url);
@@ -169,14 +171,6 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
                         }
                         videoReferer = browserVideos[0].referer;
                     }
-                }
-            }
-
-            if (foundVideos.size === 0 && !isSpa) {
-                const result = await searchIframesRecursively(url, data, url, 0);
-                if (result) {
-                    foundVideos.add(result.videoUrl);
-                    videoReferer = result.referer;
                 }
             }
         }
