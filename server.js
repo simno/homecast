@@ -59,9 +59,13 @@ app.use(helmet({
     strictTransportSecurity: false // Disable HSTS: no TLS on local network
 }));
 
-// Skip CSP for /proxy route (Chromecast needs Access-Control-Allow-Origin: *)
+// Skip CSP for /proxy route (Chromecast needs Access-Control-Allow-Origin: *).
+// Helmet's default Cross-Origin-Resource-Policy: same-origin is wrong here too:
+// the receiver fetches these segments from its own origin, so the response has
+// to be explicitly marked cross-origin readable.
 app.use('/proxy', (_req, res, next) => {
     res.removeHeader('Content-Security-Policy');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     next();
 });
 

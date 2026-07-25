@@ -427,8 +427,25 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         res.socket.setNoDelay(true);
         res.socket.setKeepAlive(true, 1000);
 
-        res.set(response.headers);
+        // Forward the upstream's headers, except the ones that are ours to
+        // decide. CORS is the important case: an upstream that pins access to
+        // its own site (pscp.tv, which serves X/Periscope broadcasts, answers
+        // `Access-Control-Allow-Origin: https://x.com`) would otherwise
+        // overwrite the `*` set above. Playlists still carried `*` because
+        // they're sent via res.send() further up, so the receiver would fetch
+        // the manifest, then fail the CORS check on every segment — the cast
+        // appears to start and then stalls without a single byte of video.
+        const upstreamHeaders = { ...response.headers };
+        for (const name of Object.keys(upstreamHeaders)) {
+            if (name.toLowerCase().startsWith('access-control-')) {
+                delete upstreamHeaders[name];
+            }
+        }
+        delete upstreamHeaders['set-cookie'];
+
+        res.set(upstreamHeaders);
         res.removeHeader('content-length');
+        res.header('Access-Control-Allow-Origin', '*');
 
         // .pipe() below does not destroy its source when the destination
         // closes unexpectedly, so an aborting client (e.g. a channel change
