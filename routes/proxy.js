@@ -18,7 +18,13 @@ const { validateProxyUrl, safeLookup } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
-const { resolveM3u8Url, tryNextSegment, filterMasterPlaylist } = require('../lib/proxy');
+const {
+    resolveM3u8Url,
+    tryNextSegment,
+    filterMasterPlaylist,
+    shouldSendReferer,
+    noteRefererRejected
+} = require('../lib/proxy');
 const { getBufferHealthStats } = require('../lib/stats');
 
 const router = express.Router();
@@ -31,29 +37,39 @@ const proxyLimiter = rateLimit({
     legacyHeaders: false
 });
 
+function withoutReferer(headers) {
+    const stripped = { ...headers };
+    delete stripped['Referer'];
+    return stripped;
+}
+
 async function fetchUpstream(url, headers, axiosConfig) {
     // Security: pin DNS resolution at connect time so a rebinding attack can't
     // swap in a private IP after validateProxyUrl() already approved this URL.
     axiosConfig = { ...axiosConfig, lookup: safeLookup };
+
+    // Hosts already known to 401 on any Referer skip the doomed first attempt.
+    if (headers['Referer'] && !shouldSendReferer(url)) {
+        return await axios({ ...axiosConfig, url, headers: withoutReferer(headers) });
+    }
+
+    // Retry bare, and only blame the Referer if that is what actually fixed it.
+    const retryWithoutReferer = async (status) => {
+        console.log(`[Proxy] Upstream returned ${status} with referer, retrying without...`);
+        const response = await axios({ ...axiosConfig, url, headers: withoutReferer(headers) });
+        noteRefererRejected(url);
+        return response;
+    };
+
     try {
         const response = await axios({ ...axiosConfig, url, headers });
-        if (response.status === 401 || response.status === 403) {
-            if (headers['Referer']) {
-                console.log(`[Proxy] Upstream returned ${response.status} with referer, retrying without...`);
-                const noRefererHeaders = { ...headers };
-                delete noRefererHeaders['Referer'];
-                return await axios({ ...axiosConfig, url, headers: noRefererHeaders });
-            }
+        if ((response.status === 401 || response.status === 403) && headers['Referer']) {
+            return await retryWithoutReferer(response.status);
         }
         return response;
     } catch (err) {
-        if (err.response && (err.response.status === 401 || err.response.status === 403)) {
-            if (headers['Referer']) {
-                console.log(`[Proxy] Upstream returned ${err.response.status} with referer, retrying without...`);
-                const noRefererHeaders = { ...headers };
-                delete noRefererHeaders['Referer'];
-                return await axios({ ...axiosConfig, url, headers: noRefererHeaders });
-            }
+        if (err.response && (err.response.status === 401 || err.response.status === 403) && headers['Referer']) {
+            return await retryWithoutReferer(err.response.status);
         }
         throw err;
     }

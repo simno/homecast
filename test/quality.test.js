@@ -95,6 +95,49 @@ lo.m3u8`;
     check('audio group preserved for chosen variant', out.includes('GROUP-ID="aud"') && out.includes('hi.m3u8') && !out.includes('lo.m3u8'));
 }
 
+// --- 'highest' skips 4K H.264, which cast receivers cannot decode ---
+{
+    // Periscope/X shape: top rendition is 3840x2160 H.264.
+    const h264_4k = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=16000000,RESOLUTION=3840x2160,CODECS="avc1.640033,mp4a.40.2"
+v2160.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"
+v1080.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2750000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2"
+v720.m3u8`;
+
+    const out = filterMasterPlaylist(h264_4k, 'highest');
+    check('highest skips 4K H.264 and picks 1080p', out.includes('v1080.m3u8') && !out.includes('v2160.m3u8'));
+
+    const explicit = filterMasterPlaylist(h264_4k, '2160');
+    check('explicit 2160 still honours the user choice', explicit.includes('v2160.m3u8') && !explicit.includes('v1080.m3u8'));
+
+    // 4K is fine in codecs receivers actually decode at that size.
+    const hevc4k = h264_4k.replace('avc1.640033', 'hvc1.1.6.L153.90');
+    const hevcOut = filterMasterPlaylist(hevc4k, 'highest');
+    check('highest keeps 4K HEVC', hevcOut.includes('v2160.m3u8'));
+
+    // Don't break a stream whose only rendition is 4K H.264.
+    const only4k = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=16000000,RESOLUTION=3840x2160,CODECS="avc1.640033"
+only.m3u8`;
+    check('4K H.264 still served when it is the only variant',
+        filterMasterPlaylist(only4k, 'highest').includes('only.m3u8'));
+
+    // No CODECS attribute means no claim to act on — behave as before.
+    const noCodecs = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=16000000,RESOLUTION=3840x2160
+a.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
+b.m3u8`;
+    check('variants without CODECS are unaffected',
+        filterMasterPlaylist(noCodecs, 'highest').includes('a.m3u8'));
+
+    // 1080p H.264 is the common case and must not be caught by the guard.
+    check('1080p H.264 is still eligible for highest',
+        filterMasterPlaylist(twitchMaster, 'highest').includes('chunked/index.m3u8'));
+}
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log(`${'='.repeat(50)}`);
