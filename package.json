@@ -52,7 +52,7 @@
     "cookie-parser": "^1.4.7",
     "csrf-csrf": "^4.0.3",
     "express": "5.2.1",
-    "express-rate-limit": "^8.6.0",
+    "express-rate-limit": "^8.6.1",
     "helmet": "^8.3.0",
     "mdns-js": "1.0.3",
     "playwright": "^1.62.0",
