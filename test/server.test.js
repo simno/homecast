@@ -201,3 +201,11 @@ test('the CSP no longer allows a font CDN: fonts are bundled', async () => {
     const font = await fetch(`${base}/fonts/roboto-flex-latin.woff2`);
     assert.strictEqual(font.status, 200);
 });
+
+test('UI files are revalidated on every load, so an upgrade shows up straight away', async () => {
+    for (const path of ['/', '/js/main.js', '/style.css']) {
+        const res = await fetch(`${base}${path}`);
+        assert.strictEqual(res.headers.get('cache-control'), 'no-cache', path);
+        assert.ok(res.headers.get('etag'), `${path} has no ETag to revalidate with`);
+    }
+});

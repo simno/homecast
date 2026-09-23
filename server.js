@@ -76,7 +76,13 @@ app.use('/proxy', (_req, res, next) => {
 // Middleware
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
+// UI files aren't fingerprinted, so the browser must check back on every load
+// (a cheap 304 via the ETag). With only max-age=0 it may reuse a stored copy
+// (back/forward, restored tabs, installed PWA) and keep showing the old UI,
+// or pair new HTML with old modules, after an upgrade.
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache')
+}));
 
 // CSRF protection (optional, can be disabled via DISABLE_CSRF=true)
 const CSRF_ENABLED = process.env.DISABLE_CSRF !== 'true';
