@@ -228,6 +228,7 @@ function setMode(mode) {
 }
 
 function resetComposeForm() {
+    cancelAnalyze();
     document.getElementById('video-url').value = '';
     document.getElementById('resolved-url-container').classList.add('hidden');
     streamOptionsContainer.innerHTML = '';
@@ -508,7 +509,7 @@ async function submitPin() {
 // params to /api/cast and handle the same needsPairing/error/success shapes,
 // so a fix to one path can't silently miss the other.
 async function performCast(params, { loadingMessage, allowPairingRetry }) {
-    const { ip, url, proxy, referer, deviceType, quality } = params;
+    const { ip, url, proxy, referer, deviceType, quality, type } = params;
 
     const castBtnLabel = document.getElementById('cast-btn-label');
     castBtn.disabled = true;
@@ -521,7 +522,7 @@ async function performCast(params, { loadingMessage, allowPairingRetry }) {
         const res = await fetch('/api/cast', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality })
+            body: JSON.stringify({ ip, url, proxy, referer, deviceType, quality, type })
         });
 
         const data = await res.json();
@@ -764,8 +765,82 @@ function checkReady() {
 
 const analyzeBtn = document.getElementById('analyze-btn');
 
-async function fetchAndAnalyze() {
-    if (analyzeBtn.disabled) return; // already analyzing, ignore duplicate clicks
+// The in-flight analysis, if any. While it runs the Analyze button is a
+// Cancel button, and closing the form or starting another analysis aborts it
+// (which also stops the server's search and its headless browser).
+let analyzeController = null;
+
+function setAnalyzing(active) {
+    analyzeBtn.classList.toggle('is-cancel', active);
+    const label = document.getElementById('analyze-btn-label');
+    if (label) label.textContent = active ? 'Cancel' : 'Analyze';
+}
+
+function cancelAnalyze() {
+    analyzeController?.abort();
+}
+
+// Reads the extract endpoint's NDJSON stream, reporting progress lines as
+// they arrive, and returns the final payload. Validation errors are sent as
+// plain JSON before streaming starts, so those are read as-is.
+async function readExtractResponse(res, onProgress) {
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('ndjson') || !res.body) return res.json();
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+    const handle = (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.progress) onProgress(msg.progress);
+        else result = msg;
+    };
+
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffer.indexOf('\n')) !== -1) {
+            handle(buffer.slice(0, newline));
+            buffer = buffer.slice(newline + 1);
+        }
+    }
+    handle(buffer + decoder.decode());
+    return result || { error: 'The server closed the connection unexpectedly' };
+}
+
+function showAnalyzeResult(data) {
+    const videos = data.videos || [];
+    const playableCount = videos.filter(v => !v.unsupported).length;
+    const onPage = data.title ? ` · ${data.title.length > 60 ? data.title.slice(0, 57) + '…' : data.title}` : '';
+
+    if (playableCount > 0) {
+        state.compose.analyzedStreams = videos;
+        displayStreamOptions(videos);
+        updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}${onPage}`, 'success');
+        checkReady();
+    } else if (videos.length > 0) {
+        // Streams were found but none are playable (e.g. MJPEG only) —
+        // don't report this as a success, or the user is left staring
+        // at a disabled Cast button with no idea why.
+        state.compose.analyzedStreams = videos;
+        displayStreamOptions(videos);
+        updateStatus(videos[0].reason || 'Found a stream, but its format is not supported for casting', 'error');
+    } else {
+        updateStatus(data.error || 'No video found at this URL', 'error');
+    }
+}
+
+// `restart`: a new URL arrived (Enter, paste) — replace any running analysis.
+// Otherwise (the button) a second press cancels the running one.
+async function fetchAndAnalyze({ restart = false } = {}) {
+    if (analyzeController) {
+        cancelAnalyze();
+        if (!restart) return;
+    }
 
     const url = document.getElementById('video-url').value.trim();
     if (!url) {
@@ -775,44 +850,52 @@ async function fetchAndAnalyze() {
         return;
     }
 
-    analyzeBtn.disabled = true;
-    updateStatus('Analyzing URL...', 'loading');
+    const controller = new AbortController();
+    analyzeController = controller;
+    setAnalyzing(true);
+    updateStatus('Analyzing URL…', 'loading');
     statusCard.classList.remove('hidden');
 
+    // Clear the previous result so a stale stream can't be cast by mistake.
+    state.compose.analyzedStreams = [];
+    streamOptionsContainer.innerHTML = '';
+    document.getElementById('resolved-url-container').classList.add('hidden');
+    if (qualitySelectRow) qualitySelectRow.classList.add('hidden');
+    checkReady();
+
     try {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = { 'Content-Type': 'application/json', 'Accept': 'application/x-ndjson' };
         if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
         const res = await fetch('/api/extract', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url }),
+            signal: controller.signal
         });
 
-        const data = await res.json();
-
-        const playableCount = data.videos ? data.videos.filter(v => !v.unsupported).length : 0;
-
-        if (playableCount > 0) {
-            state.compose.analyzedStreams = data.videos;
-            displayStreamOptions(data.videos);
-            updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}`, 'success');
-            checkReady();
-        } else if (data.videos && data.videos.length > 0) {
-            // Streams were found but none are playable (e.g. MJPEG only) —
-            // don't report this as a success, or the user is left staring
-            // at a disabled Cast button with no idea why.
-            state.compose.analyzedStreams = data.videos;
-            displayStreamOptions(data.videos);
-            updateStatus('Found a stream, but its format is not supported for casting', 'error');
-        } else {
-            updateStatus(data.error || 'No video found at this URL', 'error');
-        }
+        const data = await readExtractResponse(res, (progress) => {
+            if (analyzeController === controller) updateStatus(progress, 'loading');
+        });
+        if (analyzeController === controller) showAnalyzeResult(data);
     } catch (e) {
-        console.error('Extract error:', e);
-        updateStatus('Failed to analyze URL', 'error');
+        if (e.name === 'AbortError') {
+            if (analyzeController === controller) updateStatus('Analysis cancelled', 'info');
+        } else {
+            console.error('Extract error:', e);
+            updateStatus('Failed to analyze URL', 'error');
+        }
     } finally {
-        analyzeBtn.disabled = false;
+        if (analyzeController === controller) {
+            analyzeController = null;
+            setAnalyzing(false);
+        }
     }
+}
+
+function formatSize(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function displayStreamOptions(videos) {
@@ -859,6 +942,22 @@ function displayStreamOptions(videos) {
             badgesContainer.appendChild(resSpan);
         }
 
+        if (video.live) {
+            const liveSpan = document.createElement('span');
+            liveSpan.className = 'stream-option-type live';
+            liveSpan.textContent = 'LIVE';
+            badgesContainer.appendChild(liveSpan);
+        }
+
+        if (video.size) {
+            const sizeSpan = document.createElement('span');
+            sizeSpan.className = 'stream-option-type size';
+            sizeSpan.textContent = formatSize(video.size);
+            badgesContainer.appendChild(sizeSpan);
+        }
+
+        if (video.reason) option.title = video.reason;
+
         label.appendChild(urlSpan);
         label.appendChild(badgesContainer);
 
@@ -883,14 +982,14 @@ function displayStreamOptions(videos) {
 
 // Build the quality dropdown for a stream. Defaults to "Highest available";
 // the server forces that variant unless the user picks a specific quality
-// (or "Auto" for adaptive bitrate). Hidden for non-HLS streams, which have
+// (or "Auto" for adaptive bitrate). Hidden for progressive files (MP4 etc.), which have
 // no selectable variants.
 function populateQualityOptions(video) {
     if (!qualitySelect || !qualitySelectRow) return;
 
     qualitySelect.innerHTML = '';
 
-    if (!video || video.type !== 'hls') {
+    if (!video || (video.type !== 'hls' && video.type !== 'dash')) {
         qualitySelectRow.classList.add('hidden');
         return;
     }
@@ -923,13 +1022,14 @@ async function startCasting() {
     const selectedStream = state.compose.analyzedStreams[selectedIndex];
     const url = selectedStream.url;
     const referer = selectedStream.referer;
+    const type = selectedStream.type;
     const proxy = document.getElementById('use-proxy').checked;
     const deviceType = deviceSelect.selectedOptions[0]?.dataset?.type || 'chromecast';
     const quality = (qualitySelectRow && !qualitySelectRow.classList.contains('hidden'))
         ? qualitySelect.value
         : 'highest';
 
-    await performCast({ ip, url, proxy, referer, deviceType, quality }, {
+    await performCast({ ip, url, proxy, referer, deviceType, quality, type }, {
         loadingMessage: 'Connecting to device...',
         allowPairingRetry: true
     });
@@ -1011,12 +1111,19 @@ function closeHelp() {
 }
 
 // ===== EVENT LISTENERS =====
-document.getElementById('analyze-btn').addEventListener('click', fetchAndAnalyze);
+document.getElementById('analyze-btn').addEventListener('click', () => fetchAndAnalyze());
 document.getElementById('video-url').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
-        fetchAndAnalyze();
+        fetchAndAnalyze({ restart: true });
     }
+});
+// Pasting a link is the common case: start analysing straight away.
+document.getElementById('video-url').addEventListener('paste', () => {
+    setTimeout(() => {
+        const value = document.getElementById('video-url').value.trim();
+        if (/^https?:\/\/\S+$/i.test(value)) fetchAndAnalyze({ restart: true });
+    }, 0);
 });
 castBtn.addEventListener('click', startCasting);
 stopBtn.addEventListener('click', stopCasting);

@@ -578,6 +578,8 @@ button {
   border: 1px solid var(--md-outline-variant);
 }
 
+.btn-secondary.is-cancel svg { display: none; }
+
 .btn-secondary:hover {
   background: rgba(168, 199, 250, 0.08);
   border-color: var(--md-outline);

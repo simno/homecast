@@ -1,23 +1,7 @@
 const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
 const rateLimit = require('express-rate-limit');
-const { httpAgent, httpsAgent, USER_AGENT } = require('../lib/utils');
-const { searchIframesRecursively, detectResolution, getHlsQualities } = require('../lib/extraction');
-const { isTwitchUrl, resolveTwitchStream } = require('../lib/twitch');
-const { validateProxyUrl, safeLookup } = require('../lib/security');
-
-let extractWithBrowser = null;
-function getBrowserExtractor() {
-    if (extractWithBrowser !== null) return extractWithBrowser;
-    try {
-        extractWithBrowser = require('../lib/browser').extractWithBrowser;
-    } catch {
-        console.log('[Extract] Playwright not available, browser fallback disabled');
-        extractWithBrowser = undefined;
-    }
-    return extractWithBrowser;
-}
+const { findStreams, FinderError } = require('../lib/stream-finder');
+const { validateProxyUrl } = require('../lib/security');
 
 const router = express.Router();
 
@@ -29,11 +13,38 @@ const apiLimiter = rateLimit({
     legacyHeaders: false
 });
 
-// --- API: Extract Video URL ---
-router.post('/api/extract', apiLimiter, async (req, res) => {
-    const { url } = req.body;
+// Re-analysing the same URL within a minute (a second device, a retry after a
+// failed cast) returns instantly. Short, because stream URLs carry expiring
+// tokens.
+const RESULT_TTL_MS = 60 * 1000;
+const MAX_CACHED_RESULTS = 50;
+const resultCache = new Map();
 
-    if (!url || typeof url !== 'string') {
+function cachedResult(url) {
+    const hit = resultCache.get(url);
+    if (!hit) return null;
+    if (Date.now() - hit.at > RESULT_TTL_MS) {
+        resultCache.delete(url);
+        return null;
+    }
+    return hit.result;
+}
+
+function cacheResult(url, result) {
+    resultCache.set(url, { at: Date.now(), result });
+    while (resultCache.size > MAX_CACHED_RESULTS) {
+        resultCache.delete(resultCache.keys().next().value);
+    }
+}
+
+// --- API: Extract Video URL ---
+// Responds with JSON { videos, title } by default. A client that sends
+// `Accept: application/x-ndjson` gets progress lines ({ progress }) while the
+// search runs, then one final line holding the result or { error, status }.
+router.post('/api/extract', apiLimiter, async (req, res) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+
+    if (!url) {
         return res.status(400).json({ error: 'Invalid or missing URL parameter' });
     }
 
@@ -57,172 +68,67 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
         });
     }
 
-    let videoReferer = url;
+    const streaming = (req.get('accept') || '').includes('application/x-ndjson');
+    const send = (payload) => res.write(JSON.stringify(payload) + '\n');
+    if (streaming) {
+        res.status(200).set({
+            'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        });
+        res.flushHeaders();
+    }
 
+    // The user navigated away or hit Cancel: stop fetching and close the browser.
+    const controller = new AbortController();
+    res.on('close', () => {
+        if (!res.writableFinished) controller.abort();
+    });
+
+    const started = Date.now();
     try {
-        if (url.match(/\.(mp4|m3u8|webm|mkv)$/i)) {
-            const directType = /\.m3u8$/i.test(url) ? 'hls' : 'mp4';
-            const qualities = directType === 'hls' ? await getHlsQualities(url) : [];
-            return res.json({ videos: [{ url, referer: url, type: directType, qualities }] });
-        }
-
-        // Twitch exposes an og:video pointing at its HTML embed player, which the
-        // generic scraper below would mis-classify as a playable MP4. Resolve the
-        // real HLS stream via Twitch's playback-token API instead.
-        if (isTwitchUrl(url)) {
-            const twitch = await resolveTwitchStream(url);
-            if (twitch.status === 'ok') {
-                const qualities = await getHlsQualities(twitch.url);
-                const resolution = qualities.length > 0
-                    ? qualities[0].label
-                    : await detectResolution(twitch.url, 'hls');
-                console.log(`[Extract] Resolved Twitch HLS stream: ${twitch.url.substring(0, 80)}...`);
-                return res.json({
-                    videos: [{
-                        url: twitch.url,
-                        referer: twitch.referer,
-                        type: 'hls',
-                        resolution,
-                        qualities,
-                        unsupported: false
-                    }]
-                });
-            }
-            // The generic scraper only ever finds Twitch's embed player page (an
-            // unplayable HTML doc), so don't fall through — report the real reason.
-            const statusCode = twitch.status === 'offline' ? 404 : 502;
-            console.log(`[Extract] Twitch unavailable (${twitch.status}): ${twitch.message}`);
-            return res.status(statusCode).json({ error: twitch.message });
-        }
-
-        const { data } = await axios.get(url, {
-            headers: { 'User-Agent': USER_AGENT },
-            httpAgent: httpAgent,
-            httpsAgent: httpsAgent,
-            lookup: safeLookup,
-            timeout: 10000
-        });
-        const $ = cheerio.load(data);
-
-        const foundVideos = new Set();
-
-        $('video source').each((i, el) => {
-            const src = $(el).attr('src');
-            if (src) foundVideos.add(src);
-        });
-
-        const videoSrc = $('video').attr('src');
-        if (videoSrc) foundVideos.add(videoSrc);
-
-        const ogVideo = $('meta[property="og:video"]').attr('content');
-        if (ogVideo) foundVideos.add(ogVideo);
-
-        const ogVideoUrl = $('meta[property="og:video:url"]').attr('content');
-        if (ogVideoUrl) foundVideos.add(ogVideoUrl);
-
-        const m3u8Matches = data.matchAll(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/g);
-        for (const match of m3u8Matches) {
-            foundVideos.add(match[0]);
-        }
-
-        const mp4Matches = data.matchAll(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/g);
-        for (const match of mp4Matches) {
-            foundVideos.add(match[0]);
-        }
-
-        const mjpegMatches = data.matchAll(/https?:\/\/[^"'\s]+(?:mjpg|mjpeg|jpg\/video)[^"'\s]*/g);
-        for (const match of mjpegMatches) {
-            foundVideos.add(match[0]);
-        }
-
-        if (foundVideos.size === 0) {
-            // Nothing in the static HTML. Two fallbacks, cheapest first.
-            //
-            // This used to pick exactly one of them based on a hand-maintained list of
-            // framework marker strings ("does the HTML say __NEXT_DATA__/ng-version/..."),
-            // which failed two ways: a shell whose framework wasn't on the list never
-            // reached the browser at all (Angular's bare <app-root>, e.g. spacex.com),
-            // and whichever fallback was chosen never fell through to the other. So the
-            // list is gone — the routing is now structural, and the browser is the
-            // universal last resort rather than a special case.
-
-            // Literal iframes are the signal that plain HTTP recursion can pay off: it
-            // follows embed chains for the cost of a few fetches. Without them there is
-            // nothing to recurse into, and going straight to the browser skips pulling
-            // down JS bundles that will not contain a video URL anyway.
-            if (/<iframe/i.test(data)) {
-                const result = await searchIframesRecursively(url, data, url, 0);
-                if (result) {
-                    foundVideos.add(result.videoUrl);
-                    videoReferer = result.referer;
-                }
-            }
-
-            // Anything that renders its player client-side only becomes visible once the
-            // page actually runs, so a script-bearing page is always worth a browser pass.
-            if (foundVideos.size === 0 && /<script/i.test(data)) {
-                console.log('[Extract] No video in static HTML, trying headless browser...');
-                const browserExtract = getBrowserExtractor();
-                if (browserExtract) {
-                    const browserVideos = await browserExtract(url);
-                    if (browserVideos) {
-                        for (const v of browserVideos) {
-                            foundVideos.add(v.url);
-                        }
-                        videoReferer = browserVideos[0].referer;
-                    }
-                }
-            }
-        }
-
-        if (foundVideos.size === 0) return res.status(404).json({ error: 'No video found' });
-
-        const videos = [];
-        for (const videoUrl of foundVideos) {
-            let resolvedUrl = videoUrl;
-
-            if (videoUrl && !videoUrl.startsWith('http')) {
-                try {
-                    const u = new URL(url);
-                    resolvedUrl = new URL(videoUrl, u.origin).href;
-                } catch {
-                    continue;
-                }
-            }
-
-            const isMjpeg = resolvedUrl.match(/mjpe?g|jpg.*video/i);
-            const type = isMjpeg ? 'mjpeg' : (resolvedUrl.includes('.m3u8') ? 'hls' : 'mp4');
-
-            const qualities = type === 'hls' ? await getHlsQualities(resolvedUrl) : [];
-            const resolution = (type === 'hls' && qualities.length > 0)
-                ? qualities[0].label
-                : await detectResolution(resolvedUrl, type);
-
-            videos.push({
-                url: resolvedUrl,
-                referer: videoReferer,
-                type: type,
-                resolution: resolution,
-                qualities,
-                unsupported: isMjpeg
+        let result = cachedResult(url);
+        if (!result) {
+            result = await findStreams(url, {
+                signal: controller.signal,
+                onProgress: streaming ? (progress) => send({ progress }) : undefined
             });
+            cacheResult(url, result);
         }
 
-        videos.sort((a, b) => {
-            const priority = { hls: 0, mp4: 1, mjpeg: 2 };
-            return priority[a.type] - priority[b.type];
-        });
-
-        console.log(`[Extract] Found ${videos.length} video stream(s) at ${url}`);
-        videos.forEach((v, i) => {
+        console.log(`[Extract] Found ${result.videos.length} stream(s) at ${url} in ${Date.now() - started}ms`);
+        result.videos.forEach((v, i) => {
             const resInfo = v.resolution ? ` (${v.resolution})` : '';
-            console.log(`[Extract]   ${i + 1}. ${v.type.toUpperCase()}${resInfo}: ${v.url.substring(0, 80)}...`);
+            console.log(`[Extract]   ${i + 1}. ${v.type.toUpperCase()}${resInfo} via ${v.source}: ${v.url.substring(0, 80)}`);
         });
 
-        res.json({ videos });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
+        if (streaming) {
+            send(result);
+            return res.end();
+        }
+        res.json(result);
+    } catch (err) {
+        if (controller.signal.aborted) {
+            console.log(`[Extract] Cancelled after ${Date.now() - started}ms: ${url}`);
+            return res.end();
+        }
+        const status = err instanceof FinderError ? err.status : 500;
+        const message = err instanceof FinderError ? err.message : 'Analysis failed unexpectedly';
+        if (!(err instanceof FinderError)) console.error('[Extract] Unexpected error:', err);
+        else console.log(`[Extract] ${message} (${url})`);
+
+        if (streaming) {
+            send({ error: message, status });
+            return res.end();
+        }
+        res.status(status).json({ error: message });
     }
 });
 
+// Test seam
+function clearExtractCache() {
+    resultCache.clear();
+}
+
 module.exports = router;
+module.exports.clearExtractCache = clearExtractCache;

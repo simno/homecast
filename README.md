@@ -38,8 +38,9 @@ sources from webpages and serves them to your devices in a compatible format.
 ## Features
 
 - 🔍 **Auto-Discovery** — Finds Chromecast and Apple TV devices automatically via mDNS
-- 🎯 **Smart Extraction** — Detects video sources from webpages
-- 🌐 **HLS Support** — Handles live streams and adaptive bitrate
+- 🎯 **Smart Extraction** — Finds the stream behind a webpage: player markup, embedded JSON, iframe chains, player scripts, and a headless-browser fallback that watches the page's network traffic
+- 📺 **Twitch** — Live channels and VODs resolved to castable HLS
+- 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast; Apple TV takes HLS and MP4)
 -  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
 - ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
@@ -155,15 +156,28 @@ All modes are supported by HomeCast.
 - Streaming: HLS (m3u8), DASH
 - Simple webpage embeds with direct video links
 
+### How stream detection works
+
+Analyze escalates from cheap to expensive and stops as soon as it finds something castable, showing its progress as it goes (and it can be cancelled at any point):
+
+1. **The URL itself** — a stream link is recognised by its extension or, if it has none, by sniffing the response
+2. **The page** — `<video>`/`<source>`, Open Graph and schema.org metadata, and URLs hidden in inline scripts (JSON-escaped, URL-encoded or base64)
+3. **Embedded players** — iframes are followed a few levels deep; the frame that holds the player becomes the Referer
+4. **Player scripts** — the page's own external scripts are searched
+5. **A headless browser** — the page is run, the player is nudged to start, and its network requests are captured (also used when a site blocks plain HTTP requests)
+
+Every candidate is then checked: dead links are dropped, HLS masters report their qualities, MP4s their resolution and size, and the most likely main video is listed first (ads, previews and segments are ranked down).
+
 ### Limitations
 
-**HomeCast is designed for simple webpage videos only.** It cannot extract streams from:
+**HomeCast works best with ordinary webpage players.** It cannot extract streams from:
 
-- **Twitch** — Requires OAuth and complex API authentication
 - **YouTube** — Protected by multiple DRM and anti-scraping measures
 - **Netflix, Disney+, Hulu** — DRM-protected content
 - **Complex streaming platforms** — Sites with encrypted manifests or authentication
 - **MJPEG webcam streams** — Not supported by Chromecast protocol (requires transcoding)
+- **DRM-protected DASH** — Streams with `ContentProtection` are listed but can't be cast
+- **DASH on Apple TV** — AirPlay only plays HLS and MP4; cast DASH streams to a Chromecast
 
 For these services, use their official apps or browser extensions.
 

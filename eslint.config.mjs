@@ -27,6 +27,7 @@ export default [
                 Promise: 'readonly',
                 URL: 'readonly',
                 URLSearchParams: 'readonly',
+                AbortController: 'readonly',
                 Error: 'readonly',
                 encodeURIComponent: 'readonly',
                 decodeURIComponent: 'readonly'
@@ -89,7 +90,10 @@ export default [
                 Math: 'readonly',
                 Object: 'readonly',
                 isNaN: 'readonly',
-                Error: 'readonly'
+                Error: 'readonly',
+                AbortController: 'readonly',
+                TextDecoder: 'readonly',
+                DOMException: 'readonly'
             }
         }
     },

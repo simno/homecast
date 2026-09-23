@@ -5,10 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/proxy.test.js && node test/cache.test.js && node test/extract.test.js && node test/playlist.test.js && node test/edge-cases.test.js && node test/performance.test.js && node test/stream-detection.test.js && node test/airplay.test.js && node test/airplay-pairing.test.js && node test/twitch.test.js && node test/quality.test.js && node test/live-detection.test.js && node test/referer-memo.test.js",
+    "test": "node test/proxy.test.js && node test/cache.test.js && node test/media-scan.test.js && node test/stream-finder.test.js && node test/security.test.js && node test/playlist-rewrite.test.js && node test/dash.test.js && node test/playlist.test.js && node test/edge-cases.test.js && node test/performance.test.js && node test/stream-detection.test.js && node test/airplay.test.js && node test/airplay-pairing.test.js && node test/twitch.test.js && node test/quality.test.js && node test/live-detection.test.js && node test/referer-memo.test.js",
     "test:proxy": "node test/proxy.test.js",
     "test:cache": "node test/cache.test.js",
-    "test:extract": "node test/extract.test.js",
+    "test:extract": "node test/media-scan.test.js && node test/stream-finder.test.js",
+    "test:security": "node test/security.test.js",
+    "test:dash": "node test/dash.test.js",
     "test:playlist": "node test/playlist.test.js",
     "test:edge-cases": "node test/edge-cases.test.js",
     "test:performance": "node test/performance.test.js",
@@ -56,13 +58,13 @@
     "helmet": "^8.3.0",
     "mdns-js": "1.0.3",
     "playwright": "^1.63.0",
-    "ws": "^8.21.2"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.1",
-    "eslint": "^10.10.0",
+    "@types/node": "^26.6.2",
+    "eslint": "^10.11.0",
     "typescript": "^7.0.2"
   },
   "overrides": {

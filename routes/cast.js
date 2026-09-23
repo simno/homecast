@@ -27,6 +27,8 @@ function normalizeQuality(quality) {
     return 'highest';
 }
 
+const STREAM_TYPES = new Set(['hls', 'dash', 'mp4', 'webm', 'mkv']);
+
 function validateUrl(url) {
     if (!url || typeof url !== 'string') return false;
     try {
@@ -41,6 +43,8 @@ function validateUrl(url) {
 router.post('/api/cast', (req, res) => {
     const { ip, url, proxy, referer, deviceType } = req.body;
     const quality = normalizeQuality(req.body.quality);
+    // The extractor's verdict on the format, for URLs that don't carry an extension.
+    const type = STREAM_TYPES.has(req.body.type) ? req.body.type : undefined;
 
     if (!validateIp(ip)) {
         return res.status(400).json({ error: 'Invalid or missing IP address' });
@@ -51,10 +55,13 @@ router.post('/api/cast', (req, res) => {
 
     // Route to AirPlay or Chromecast based on device type
     if (deviceType === 'airplay' || (devices.get(ip)?.type === 'airplay')) {
-        return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res);
+        if (type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url))) {
+            return res.status(400).json({ error: 'Apple TV cannot play DASH streams. Cast this one to a Chromecast, or pick an HLS or MP4 stream.' });
+        }
+        return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
     }
 
-    castToDevice(ip, url, !!proxy, referer || '', quality, res);
+    castToDevice(ip, url, !!proxy, referer || '', quality, res, type);
 });
 
 // --- API: Get Session State ---

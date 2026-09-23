@@ -14,24 +14,36 @@ const {
     CACHE_TTL_LIVE,
     USER_AGENT
 } = require('../lib/utils');
-const { validateProxyUrl, safeLookup } = require('../lib/security');
+const { validateProxyUrl, safeRequestOptions } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
 const {
-    resolveM3u8Url,
     tryNextSegment,
     filterMasterPlaylist,
+    rewritePlaylist,
+    buildProxyUrl,
     shouldSendReferer,
     noteRefererRejected
 } = require('../lib/proxy');
 const { getBufferHealthStats } = require('../lib/stats');
+const { rewriteMpd, describeMpd, dashSegmentUrl, upstreamFromDashPath } = require('../lib/dash');
 
 const router = express.Router();
 
 const proxyLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 100,
+    message: 'Too many proxy requests, please try again later',
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+// DASH segments arrive far faster than HLS ones: audio and video are fetched
+// separately, often as 2s segments, and on-demand streams add byte ranges.
+const dashSegmentLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 600,
     message: 'Too many proxy requests, please try again later',
     standardHeaders: true,
     legacyHeaders: false
@@ -45,8 +57,9 @@ function withoutReferer(headers) {
 
 async function fetchUpstream(url, headers, axiosConfig) {
     // Security: pin DNS resolution at connect time so a rebinding attack can't
-    // swap in a private IP after validateProxyUrl() already approved this URL.
-    axiosConfig = { ...axiosConfig, lookup: safeLookup };
+    // swap in a private IP after validateProxyUrl() already approved this URL,
+    // and vet every redirect hop (IP-literal hops never reach the lookup).
+    axiosConfig = { ...axiosConfig, ...safeRequestOptions };
 
     // Hosts already known to 401 on any Referer skip the doomed first attempt.
     if (headers['Referer'] && !shouldSendReferer(url)) {
@@ -116,14 +129,16 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer) 
         const filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
 
-        const rewrittenM3u8 = filteredM3u8.split('\n').map(line => {
-            const result = resolveM3u8Url(line, baseUrl);
-            if (!result.isUrl) return line;
-
-            // Carry quality onto child playlist requests so variant and
-            // segment fetches stay consistent (and cache cleanly).
-            return `http://${req.headers.host}/proxy?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer || '')}&quality=${encodeURIComponent(quality)}`;
-        }).join('\n');
+        // Carry quality onto child playlist requests so variant and segment
+        // fetches stay consistent (and cache cleanly), and flag child playlists
+        // so extensionless ones are still rewritten when they come back through.
+        const rewrittenM3u8 = rewritePlaylist(filteredM3u8, baseUrl, (childUrl, isPlaylist) =>
+            buildProxyUrl(req.headers.host, {
+                url: childUrl,
+                referer,
+                quality,
+                type: isPlaylist ? 'hls' : undefined
+            }));
 
         playlistCache.set(cacheKey, {
             content: rewrittenM3u8,
@@ -167,20 +182,9 @@ setInterval(() => {
     }
 }, 120000);
 
-// --- API: Proxy Stream ---
-router.get('/proxy', proxyLimiter, async (req, res) => {
-    const { url, referer } = req.query;
-    // Quality cap for HLS master playlists. Absent/empty defaults to 'highest'
-    // so the highest available variant plays on every site unless the user
-    // explicitly picks another quality (or 'auto' for adaptive bitrate).
-    const quality = req.query.quality || 'highest';
-    const clientIp = req.ip || req.connection.remoteAddress;
-
-    console.log(`[Proxy] Request from ${clientIp} for: ${url?.substring(0, 80)}...`);
-
-    if (!url) return res.status(400).json({ error: 'URL parameter required' });
-
-    // Find which device this client belongs to
+// Which cast device a proxy request belongs to, and that device's stats
+// (created on first sight). Also feeds the health and stall monitors.
+function trackClient(clientIp) {
     let deviceIp = null;
 
     let normalizedClientIp = clientIp;
@@ -219,6 +223,207 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
     const stats = streamStats.get(deviceIp);
     stats.lastActivity = Date.now();
 
+    return { deviceIp, stats };
+}
+
+// Stream an upstream response to the receiver, forwarding its status (206
+// for ranges) and headers, and counting the bytes toward the device's stats.
+function pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped = false }) {
+    // Performance: Optimize socket for video streaming
+    res.socket.setNoDelay(true);
+    res.socket.setKeepAlive(true, 1000);
+
+    // Forward the upstream's headers, except the ones that are ours to
+    // decide. CORS is the important case: an upstream that pins access to
+    // its own site (pscp.tv, which serves X/Periscope broadcasts, answers
+    // `Access-Control-Allow-Origin: https://x.com`) would otherwise
+    // overwrite the `*` set above. Playlists still carried `*` because
+    // they're sent via res.send() further up, so the receiver would fetch
+    // the manifest, then fail the CORS check on every segment — the cast
+    // appears to start and then stalls without a single byte of video.
+    const upstreamHeaders = { ...response.headers };
+    for (const name of Object.keys(upstreamHeaders)) {
+        if (name.toLowerCase().startsWith('access-control-')) {
+            delete upstreamHeaders[name];
+        }
+    }
+    delete upstreamHeaders['set-cookie'];
+
+    res.status(response.status);
+    res.set(upstreamHeaders);
+    res.removeHeader('content-length');
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges');
+
+    // .pipe() below does not destroy its source when the destination
+    // closes unexpectedly, so an aborting client (e.g. a channel change
+    // mid-segment) would otherwise leak the upstream socket.
+    res.on('close', () => {
+        if (!res.writableEnded) response.data.destroy();
+    });
+
+    stats.segmentCount++;
+    let segmentBytes = 0;
+    response.data.on('data', (chunk) => {
+        stats.totalBytes += chunk.length;
+        segmentBytes += chunk.length;
+    });
+
+    response.data.on('error', (err) => {
+        console.error('[Proxy] Stream pipe error:', err);
+        console.error('[Proxy] URL was:', currentUrl.substring(0, 100));
+        if (!res.headersSent) res.status(500).end();
+    });
+
+    response.data.on('end', () => {
+        const segmentName = currentUrl.substring(currentUrl.lastIndexOf('/') + 1, currentUrl.lastIndexOf('?') > 0 ? currentUrl.lastIndexOf('?') : undefined);
+        console.log(`[Proxy] Segment completed: ${segmentName} (${segmentBytes} bytes)${segmentSkipped ? ' [SKIPPED AHEAD]' : ''}`);
+
+        const duration = (Date.now() - stats.startTime) / 1000;
+        const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0;
+
+        let currentDelay = 0;
+        const tracking = playbackTracking.get(deviceIp);
+        if (tracking && tracking.lastDelay !== undefined) {
+            currentDelay = tracking.lastDelay;
+        }
+
+        broadcast({
+            type: 'streamStats',
+            deviceIp: deviceIp,
+            bufferHealth: getBufferHealthStats(deviceIp),
+            stats: {
+                totalBytes: stats.totalBytes,
+                totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
+                transferRate: transferRate,
+                duration: Math.round(duration),
+                resolution: stats.resolution,
+                bitrate: stats.bitrate,
+                segmentCount: stats.segmentCount,
+                cacheHits: stats.cacheHits,
+                delay: currentDelay,
+                frameRate: stats.frameRate
+            }
+        });
+    });
+
+    // Performance: Stream with larger chunks for better throughput
+    response.data.pipe(res, { highWaterMark: 256 * 1024 });
+}
+
+// Fetch an MPD and hand the receiver a copy whose every URL points back at us.
+async function serveDashManifest(req, res, { url, referer, quality, headers, stats }) {
+    const response = await fetchUpstream(url, headers, {
+        method: 'get',
+        responseType: 'text',
+        transformResponse: (body) => body,
+        httpAgent: httpAgent,
+        httpsAgent: httpsAgent,
+        timeout: 15000,
+        maxContentLength: 8 * 1024 * 1024,
+        validateStatus: (status) => status < 500
+    });
+
+    if (response.status >= 400) {
+        console.error(`[Proxy] Upstream returned ${response.status} for MPD ${url}`);
+        return res.status(response.status).json({ error: `Upstream error: ${response.status}` });
+    }
+
+    // Relative references resolve against where the MPD actually came from.
+    const mpdUrl = response.request?.res?.responseUrl || url;
+    const host = req.headers.host;
+    const rewritten = rewriteMpd(response.data, mpdUrl, {
+        quality,
+        toSegmentUrl: (segmentUrl) => dashSegmentUrl(host, segmentUrl, referer),
+        toManifestUrl: (manifestUrl) => buildProxyUrl(host, { url: manifestUrl, referer, quality, type: 'dash' })
+    });
+    if (!rewritten) {
+        return res.status(502).json({ error: 'Upstream did not return a DASH manifest' });
+    }
+
+    const top = describeMpd(rewritten)?.qualities[0];
+    if (top) {
+        stats.resolution = top.label;
+        stats.bitrate = Math.round(top.bandwidth / 1000);
+    }
+
+    res.set('Content-Type', 'application/dash+xml');
+    res.set('Cache-Control', 'no-cache');
+    return res.send(rewritten);
+}
+
+// --- API: DASH segments ---
+// /proxy/dash/<token>/<upstream path>: see lib/dash.js for why DASH needs a
+// path-shaped proxy. Ranges are forwarded — on-demand DASH (SegmentBase)
+// reads its index and media as byte ranges of a single file.
+const DASH_SEGMENT_PATH = /^\/proxy\/dash\//;
+
+router.options(DASH_SEGMENT_PATH, (_req, res) => {
+    res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Range',
+        'Access-Control-Max-Age': '86400'
+    });
+    res.status(204).end();
+});
+
+router.get(DASH_SEGMENT_PATH, dashSegmentLimiter, async (req, res) => {
+    const target = upstreamFromDashPath(req.originalUrl);
+    if (!target) return res.status(400).json({ error: 'Malformed DASH proxy path' });
+
+    const { deviceIp, stats } = trackClient(req.ip || req.socket.remoteAddress);
+
+    const validation = await validateProxyUrl(target.url);
+    if (!validation.valid) {
+        console.warn(`[Security] Blocked DASH segment request: ${validation.reason}`);
+        return res.status(403).json({ error: 'URL blocked by security policy', reason: validation.reason });
+    }
+
+    res.header('Access-Control-Allow-Origin', '*');
+
+    const headers = { 'User-Agent': USER_AGENT };
+    if (target.referer) headers['Referer'] = target.referer;
+    if (req.headers.range) headers['Range'] = req.headers.range;
+
+    try {
+        const response = await fetchUpstream(target.url, headers, {
+            method: 'get',
+            responseType: 'stream',
+            httpAgent: httpAgent,
+            httpsAgent: httpsAgent,
+            timeout: 30000,
+            validateStatus: (status) => status < 500
+        });
+
+        if (response.status >= 400) {
+            response.data.destroy();
+            console.error(`[Proxy] Upstream returned ${response.status} for DASH segment ${target.url.substring(0, 100)}`);
+            return res.status(response.status).end();
+        }
+
+        pipeUpstream(res, response, { deviceIp, stats, url: target.url });
+    } catch (e) {
+        console.error('[Proxy] DASH segment error:', e.message);
+        if (!res.headersSent) res.status(502).json({ error: 'Proxy failed: ' + e.message });
+    }
+});
+
+// --- API: Proxy Stream ---
+router.get('/proxy', proxyLimiter, async (req, res) => {
+    const { url, referer } = req.query;
+    // Quality cap for HLS master playlists. Absent/empty defaults to 'highest'
+    // so the highest available variant plays on every site unless the user
+    // explicitly picks another quality (or 'auto' for adaptive bitrate).
+    const quality = req.query.quality || 'highest';
+    const clientIp = req.ip || req.connection.remoteAddress;
+
+    console.log(`[Proxy] Request from ${clientIp} for: ${url?.substring(0, 80)}...`);
+
+    if (!url) return res.status(400).json({ error: 'URL parameter required' });
+
+    const { deviceIp, stats } = trackClient(clientIp);
+
     // Security: Validate URL for SSRF protection
     const validation = await validateProxyUrl(url);
     if (!validation.valid) {
@@ -239,12 +444,18 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         };
         if (referer) headers['Referer'] = referer;
 
-        const contentType = url.includes('.m3u8') || url.includes('playlist')
-            ? 'application/vnd.apple.mpegurl'
-            : '';
+        // `type` comes from the extractor (it sniffed the response) or from a
+        // parent manifest, and covers manifests whose URL doesn't say so.
+        const isDash = req.query.type === 'dash' || (req.query.type !== 'hls' && /\.mpd(?:$|[?;])/i.test(url));
+        if (isDash) {
+            return await serveDashManifest(req, res, { url, referer, quality, headers, stats });
+        }
+
+        const isPlaylist = req.query.type === 'hls' || url.includes('.m3u8') || url.includes('playlist');
+        const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : '';
 
         // HLS Playlist - Check cache first
-        if (url.includes('.m3u8') || url.includes('playlist')) {
+        if (isPlaylist) {
             // Quality is part of the key: the same upstream master URL yields
             // different rewritten playlists per requested quality.
             const cacheKey = `${url}|q=${quality}`;
@@ -338,7 +549,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             return res.send(rewrittenM3u8);
         }
 
-        // Standard Binary Stream (Segments, MP4, etc.) - No caching
+        // Standard Binary Stream (Segments, MP4, etc.) - No caching.
+        // Forward the receiver's Range so MP4 seeking gets a 206 of the right bytes.
+        if (req.headers.range) headers['Range'] = req.headers.range;
         const isVideoSegment = url.includes('.ts') || url.includes('.m4s') || url.includes('.mp4');
         let response;
         let _lastError;
@@ -439,84 +652,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             }
         }
 
-        // Performance: Optimize socket for video streaming
-        res.socket.setNoDelay(true);
-        res.socket.setKeepAlive(true, 1000);
-
-        // Forward the upstream's headers, except the ones that are ours to
-        // decide. CORS is the important case: an upstream that pins access to
-        // its own site (pscp.tv, which serves X/Periscope broadcasts, answers
-        // `Access-Control-Allow-Origin: https://x.com`) would otherwise
-        // overwrite the `*` set above. Playlists still carried `*` because
-        // they're sent via res.send() further up, so the receiver would fetch
-        // the manifest, then fail the CORS check on every segment — the cast
-        // appears to start and then stalls without a single byte of video.
-        const upstreamHeaders = { ...response.headers };
-        for (const name of Object.keys(upstreamHeaders)) {
-            if (name.toLowerCase().startsWith('access-control-')) {
-                delete upstreamHeaders[name];
-            }
-        }
-        delete upstreamHeaders['set-cookie'];
-
-        res.set(upstreamHeaders);
-        res.removeHeader('content-length');
-        res.header('Access-Control-Allow-Origin', '*');
-
-        // .pipe() below does not destroy its source when the destination
-        // closes unexpectedly, so an aborting client (e.g. a channel change
-        // mid-segment) would otherwise leak the upstream socket.
-        res.on('close', () => {
-            if (!res.writableEnded) response.data.destroy();
-        });
-
-        stats.segmentCount++;
-        let segmentBytes = 0;
-        response.data.on('data', (chunk) => {
-            stats.totalBytes += chunk.length;
-            segmentBytes += chunk.length;
-        });
-
-        response.data.on('error', (err) => {
-            console.error('[Proxy] Stream pipe error:', err);
-            console.error('[Proxy] URL was:', currentUrl.substring(0, 100));
-            if (!res.headersSent) res.status(500).end();
-        });
-
-        response.data.on('end', () => {
-            const segmentName = currentUrl.substring(currentUrl.lastIndexOf('/') + 1, currentUrl.lastIndexOf('?') > 0 ? currentUrl.lastIndexOf('?') : undefined);
-            console.log(`[Proxy] Segment completed: ${segmentName} (${segmentBytes} bytes)${segmentSkipped ? ' [SKIPPED AHEAD]' : ''}`);
-
-            const duration = (Date.now() - stats.startTime) / 1000;
-            const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0;
-
-            let currentDelay = 0;
-            const tracking = playbackTracking.get(deviceIp);
-            if (tracking && tracking.lastDelay !== undefined) {
-                currentDelay = tracking.lastDelay;
-            }
-
-            broadcast({
-                type: 'streamStats',
-                deviceIp: deviceIp,
-                bufferHealth: getBufferHealthStats(deviceIp),
-                stats: {
-                    totalBytes: stats.totalBytes,
-                    totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
-                    transferRate: transferRate,
-                    duration: Math.round(duration),
-                    resolution: stats.resolution,
-                    bitrate: stats.bitrate,
-                    segmentCount: stats.segmentCount,
-                    cacheHits: stats.cacheHits,
-                    delay: currentDelay,
-                    frameRate: stats.frameRate
-                }
-            });
-        });
-
-        // Performance: Stream with larger chunks for better throughput
-        response.data.pipe(res, { highWaterMark: 256 * 1024 });
+        pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
 
     } catch (e) {
         console.error('[Proxy] Error:', e.message);
