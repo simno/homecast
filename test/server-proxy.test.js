@@ -44,6 +44,10 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': 'https://site.example' });
         return res.end('1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n');
     }
+    if (path === '/show/poster.jpg') {
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+    }
     if (path === '/show/subs/not-subs.vtt') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         return res.end('<html>Login required</html>');
@@ -155,4 +159,18 @@ test('subtitles are served as WebVTT, converted from SRT, readable by the receiv
 test('a subtitle URL that returns something else is refused', async () => {
     const res = await proxy(`${cdn}/show/subs/not-subs.vtt`, { type: 'subtitle' });
     assert.strictEqual(res.status, 415);
+});
+
+test('a thumbnail is passed through as an image', async () => {
+    const res = await proxy(`${cdn}/show/poster.jpg`, { type: 'image' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get('content-type'), 'image/jpeg');
+    assert.deepStrictEqual([...Buffer.from(await res.arrayBuffer())], [0xff, 0xd8, 0xff, 0xe0]);
+});
+
+test('an image URL that returns something else is refused', async () => {
+    const res = await proxy(`${cdn}/show/subs/not-subs.vtt`, { type: 'image' });
+    assert.strictEqual(res.status, 415);
+    const playlist = await proxy(`${cdn}/show/master.m3u8`, { type: 'image' });
+    assert.strictEqual(playlist.status, 415);
 });

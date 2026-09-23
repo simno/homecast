@@ -1,8 +1,55 @@
 // The dashboard for the stream being viewed: stats, health, graphs.
 import { drawRateGraph, drawDelayGraph, graphColors } from './graphs.js';
-import { dashboardDeviceName, healthDot, healthText, stat } from './dom.js';
+import {
+    dashboardDeviceName, healthDot, healthText, stat,
+    dashboardNotice, dashboardNoticeText, dashboardNoticeClose, statsDetails
+} from './dom.js';
 import { state, HEALTH_LABELS, MAX_HISTORY, STALE_TIMEOUT } from './state.js';
 import { renderDashboardSubtitles } from './subtitles.js';
+import { renderPlayback, renderPosition } from './playback.js';
+
+// ===== NOTICES =====
+// Recovery progress and errors for a stream. Kept per stream so switching
+// to it later still shows what happened; success notes clear themselves.
+const NOTICE_CLEAR_MS = 5000;
+const noticeTimers = new Map();
+
+export function setStreamNotice(ip, notice) {
+    const stream = state.streams.get(ip);
+    if (!stream) return;
+    stream.notice = notice;
+
+    clearTimeout(noticeTimers.get(ip));
+    noticeTimers.delete(ip);
+    if (notice?.type === 'success') {
+        noticeTimers.set(ip, setTimeout(() => {
+            const current = state.streams.get(ip);
+            if (current?.notice === notice) setStreamNotice(ip, null);
+        }, NOTICE_CLEAR_MS));
+    }
+    if (ip === state.activeStreamIp) renderNotice(notice);
+}
+
+function renderNotice(notice) {
+    dashboardNotice.classList.toggle('hidden', !notice);
+    if (!notice) return;
+    dashboardNotice.dataset.type = notice.type;
+    dashboardNoticeText.textContent = notice.message;
+}
+
+dashboardNoticeClose.addEventListener('click', () => {
+    if (state.activeStreamIp) setStreamNotice(state.activeStreamIp, null);
+});
+
+// The technical stats stay open or closed as the user left them.
+try {
+    statsDetails.open = localStorage.getItem('homecast_stats_open') === 'true';
+} catch { /* storage unavailable */ }
+statsDetails.addEventListener('toggle', () => {
+    try {
+        localStorage.setItem('homecast_stats_open', String(statsDetails.open));
+    } catch { /* storage unavailable */ }
+});
 
 export function renderDashboard() {
     const stream = state.streams.get(state.activeStreamIp);
@@ -12,6 +59,8 @@ export function renderDashboard() {
     dashboardDeviceName.textContent = stream.deviceName + typeLabel;
 
     updateConnectionHealthUI(stream.health);
+    renderNotice(stream.notice);
+    renderPlayback(stream);
 
     if (stream.stats && Object.keys(stream.stats).length > 0) {
         renderStats(stream.stats);
@@ -19,9 +68,7 @@ export function renderDashboard() {
         resetDashboardStats();
     }
 
-    if (stream.bufferHealth) {
-        renderBufferHealth(stream.bufferHealth);
-    }
+    renderBufferHealth(stream.bufferHealth);
 
     renderDashboardSubtitles(stream);
 
@@ -42,7 +89,7 @@ export function renderStats(stats) {
         else resolutionDisplay = 'Live Stream';
     }
 
-    let bitrateDisplay = '- Kbps';
+    let bitrateDisplay = '–';
     if (stats.bitrate) {
         bitrateDisplay = stats.bitrate >= 1000
             ? `${(stats.bitrate / 1000).toFixed(1)} Mbps`
@@ -76,31 +123,33 @@ export function renderStats(stats) {
     stat.cache.textContent = stats.cacheHits || 0;
     stat.frameRate.textContent = stats.frameRate
         ? `${Math.round(stats.frameRate)} FPS`
-        : '-';
+        : '–';
 }
 
 function resetDashboardStats() {
     stat.resolution.textContent = 'Unknown';
-    stat.frameRate.textContent = '-';
-    stat.bitrate.textContent = '- Kbps';
+    stat.frameRate.textContent = '–';
+    stat.bitrate.textContent = '–';
     stat.transferred.textContent = '0 MB';
     stat.segments.textContent = '0';
     stat.duration.textContent = '0s';
     stat.cache.textContent = '0';
-    stat.bufferHealth.textContent = '-';
-    stat.bufferHealth.style.color = '';
 }
 
+// The score, big, with what it's made of underneath.
 export function renderBufferHealth(bufferHealth) {
-    if (!bufferHealth) return;
-    const { healthScore, bufferingEvents, totalBufferingTime } = bufferHealth;
     const el = stat.bufferHealth;
-
-    let text = `${healthScore}%`;
-    if (bufferingEvents > 0) {
-        text += ` (${bufferingEvents} events, ${totalBufferingTime}s)`;
+    if (!bufferHealth) {
+        el.textContent = '–';
+        el.style.color = '';
+        stat.bufferDetail.textContent = 'Waiting for data';
+        return;
     }
-    el.textContent = text;
+    const { healthScore, bufferingEvents, totalBufferingTime } = bufferHealth;
+    el.textContent = `${healthScore}%`;
+    stat.bufferDetail.textContent = bufferingEvents > 0
+        ? `${bufferingEvents} stall${bufferingEvents === 1 ? '' : 's'} · ${totalBufferingTime}s buffering`
+        : 'No stalls';
 
     if (healthScore >= 95) el.style.color = graphColors.success;
     else if (healthScore >= 85) el.style.color = graphColors.warning;
@@ -144,6 +193,7 @@ export function startDashboardTimers({ onStale }) {
             if (ip === state.activeStreamIp) {
                 drawRateGraph(stream.rateHistory);
                 if (stream.delayHistory.length > 0) drawDelayGraph(stream.delayHistory);
+                renderPosition(stream);
             }
         });
     }, 1000);

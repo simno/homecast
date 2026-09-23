@@ -49,12 +49,10 @@ app.use(helmet({
         directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
-            // index.html pulls Roboto from Google Fonts: the stylesheet comes
-            // from fonts.googleapis.com and the font files it references from
-            // fonts.gstatic.com. Both need allowing or the UI silently falls
-            // back to system fonts.
-            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-            fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+            // Fonts are bundled in public/fonts, so the page works offline and
+            // never calls out to a font CDN.
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            fontSrc: ["'self'"],
             connectSrc: ["'self'", 'ws:', 'wss:'],
             imgSrc: ["'self'", 'data:'],
             frameAncestors: ["'none'"],

@@ -82,6 +82,17 @@ function drawRateGraph(rateHistory) {
     ctx.fill();
 }
 
+// Playing 15-30s behind live is normal for HLS (HomeCast aims 15s behind
+// the edge), so only a delay well past that is flagged.
+const DELAY_WARN_S = 45;
+const DELAY_BAD_S = 90;
+
+function delayColor(delay) {
+    if (delay >= DELAY_BAD_S) return graphColors.danger;
+    if (delay >= DELAY_WARN_S) return graphColors.warning;
+    return graphColors.delay;
+}
+
 function drawDelayGraph(delayHistory) {
     const section = document.getElementById('delay-graph-section');
     if (!section) return;
@@ -93,7 +104,9 @@ function drawDelayGraph(delayHistory) {
     section.classList.remove('hidden');
 
     const delay = delayHistory[delayHistory.length - 1] || 0;
-    document.getElementById('graph-current-delay').textContent = `${delay.toFixed(1)}s`;
+    const delayEl = document.getElementById('graph-current-delay');
+    delayEl.textContent = `${delay.toFixed(1)}s`;
+    delayEl.style.color = delayColor(delay);
 
     const canvas = document.getElementById('delay-graph');
     if (!canvas) return;

@@ -42,6 +42,9 @@ sources from webpages and serves them to your devices in a compatible format.
 - 📺 **Twitch** — Live channels and VODs resolved to castable HLS
 - 💬 **Subtitles** — Picks up subtitles from the page and from HLS/DASH manifests, or casts a WebVTT/SRT file by URL; switch or turn them off while playing
 - 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast; Apple TV takes HLS and MP4)
+- 🎮 **Remote Control** — Pause, skip and set the volume from the dashboard (volume on Chromecast; Apple TV uses its remote)
+- 🕘 **Recent Casts** — Recently cast pages are one click away, and the last device is preselected
+- 🩺 **Stream Recovery** — Stalled streams restart automatically, with progress shown on the dashboard
 -  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
 - ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
@@ -204,7 +207,7 @@ After Analyze, a **Subtitles** picker lists what was found with the video:
 | Chromecast | All three. Switch tracks or turn them off from the dashboard while playing                                      |
 | Apple TV   | Subtitles inside HLS streams, turned on with the TV remote. AirPlay can't show a separate subtitle file |
 
-Subtitle files are always fetched through HomeCast (even with Proxy Stream off), because receivers only accept them
+Subtitle files are always fetched through HomeCast (even with Proxy stream off), because receivers only accept them
 with CORS headers. SRT is converted to WebVTT on the way, and the last language you picked becomes the default for
 the next video.
 
@@ -235,8 +238,8 @@ For these services, use their official apps or browser extensions.
 
 ### Tips
 
-- Keep "Proxy Stream" enabled for best compatibility
-- Use "Manual IP" if your device isn't discovered
+- Keep "Proxy stream" (under Advanced) enabled for best compatibility
+- Press the rescan button next to the device list, or use "Manual IP", if your device isn't discovered
 - Works best with simple video hosting sites and direct stream URLs
 
 ## Configuration
@@ -342,7 +345,7 @@ Ensure these ports are open:
 
 ### Video Won't Play
 
-- Enable "Proxy Stream" option
+- Enable "Proxy stream" (under Advanced)
 - Check server logs for errors
 - Verify the source URL is still valid
 

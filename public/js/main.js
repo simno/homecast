@@ -2,14 +2,14 @@
 // were playing when the page was last open.
 import { refreshGraphColors } from './graphs.js';
 import {
-    videoUrlInput, analyzeBtn, castBtn, stopBtn, addStreamBtn, composeOverlay,
-    helpBtn, helpModal, helpCloseBtn
+    videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay,
+    helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
 import { fetchCsrfToken, checkSessionStatus } from './api.js';
 import { redrawActiveGraphs, startDashboardTimers } from './dashboard.js';
 import {
-    createStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth
+    createStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
 } from './streams.js';
 import { updateDeviceList, findDeviceName, onDeviceChange, wireDeviceControls } from './devices.js';
 import {
@@ -18,6 +18,8 @@ import {
 } from './compose.js';
 import { wirePairingControls, hidePinPrompt, isPinPromptOpen } from './pairing.js';
 import { wireSubtitleControls } from './subtitles.js';
+import { wirePlaybackControls } from './playback.js';
+import { wireRecentControls } from './recent.js';
 import { connectWebSocket } from './websocket.js';
 
 fetchCsrfToken();
@@ -67,6 +69,14 @@ onDeviceChange(onDeviceChanged);
 wireDeviceControls();
 wirePairingControls();
 wireSubtitleControls({ onComposeChange: checkReady });
+wirePlaybackControls();
+wireRecentControls({ onPick: () => fetchAndAnalyze({ restart: true }) });
+
+// Proxying is on by default and tucked under Advanced; say so on the
+// collapsed section when it's been turned off.
+useProxyCheckbox.addEventListener('change', () => {
+    advancedNote.classList.toggle('hidden', useProxyCheckbox.checked);
+});
 
 analyzeBtn.addEventListener('click', () => fetchAndAnalyze());
 videoUrlInput.addEventListener('keydown', (e) => {
@@ -83,11 +93,16 @@ videoUrlInput.addEventListener('paste', () => {
     }, 0);
 });
 castBtn.addEventListener('click', startCasting);
-stopBtn.addEventListener('click', async () => {
-    if (!state.activeStreamIp) return;
-    stopBtn.disabled = true;
-    await stopStreamByIp(state.activeStreamIp);
-    stopBtn.disabled = false;
+stopBtn.addEventListener('click', () => {
+    const ip = state.activeStreamIp;
+    if (!ip) return;
+    confirmStop(stopBtn, stopBtnLabel, 'Confirm stop', async () => {
+        stopBtn.disabled = true;
+        stopBtnLabel.textContent = 'Stopping…';
+        await stopStreamByIp(ip);
+        stopBtnLabel.textContent = 'Stop';
+        stopBtn.disabled = false;
+    });
 });
 addStreamBtn.addEventListener('click', openComposeOverlay);
 composeOverlay.querySelector('.compose-overlay-backdrop').addEventListener('click', closeComposeOverlay);
@@ -130,6 +145,7 @@ async function restoreStreams(savedState) {
         const stream = state.streams.get(ip);
         if (session.stats) stream.stats = session.stats;
         if (session.subtitles) stream.subtitles = session.subtitles;
+        if (session.volume) stream.volume = session.volume;
         anyActive = true;
     }
 

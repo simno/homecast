@@ -7,12 +7,23 @@ export const app = $('app');
 export const composePanel = $('compose-panel');
 export const composeOverlay = $('compose-overlay');
 export const deviceSelect = $('device-select');
+export const rescanBtn = $('rescan-btn');
+export const deviceHint = $('device-hint');
+export const deviceHintText = $('device-hint-text');
+export const manualIpLink = $('manual-ip-link');
 export const manualIpContainer = $('manual-ip-container');
 export const manualIpInput = $('manual-ip');
 export const manualIpHint = $('manual-ip-hint');
 export const videoUrlInput = $('video-url');
 export const analyzeBtn = $('analyze-btn');
 export const analyzeBtnLabel = $('analyze-btn-label');
+export const recentUrls = $('recent-urls');
+export const recentList = $('recent-list');
+export const recentClearBtn = $('recent-clear');
+export const videoPreview = $('video-preview');
+export const videoPreviewImg = $('video-preview-img');
+export const videoPreviewTitle = $('video-preview-title');
+export const videoPreviewHost = $('video-preview-host');
 export const resolvedUrlContainer = $('resolved-url-container');
 export const streamsFoundText = $('streams-found-text');
 export const streamOptionsContainer = $('stream-options');
@@ -23,6 +34,7 @@ export const subtitleSelect = $('subtitle-select');
 export const subtitleUrlInput = $('subtitle-url');
 export const subtitleNote = $('subtitle-note');
 export const useProxyCheckbox = $('use-proxy');
+export const advancedNote = $('advanced-note');
 export const castBtn = $('cast-btn');
 export const castBtnLabel = $('cast-btn-label');
 
@@ -42,6 +54,28 @@ export const healthText = $('health-text');
 export const dashboardSubtitles = $('dashboard-subtitles');
 export const dashboardSubtitleSelect = $('dashboard-subtitle-select');
 export const stopBtn = $('stop-btn');
+export const stopBtnLabel = $('stop-btn-label');
+export const dashboardNotice = $('dashboard-notice');
+export const dashboardNoticeText = $('dashboard-notice-text');
+export const dashboardNoticeClose = $('dashboard-notice-close');
+export const statsDetails = $('stats-details');
+export const delayValue = $('graph-current-delay');
+
+// Remote control
+export const playback = {
+    seekBack: $('seek-back-btn'),
+    playPause: $('play-pause-btn'),
+    playIcon: $('play-icon'),
+    pauseIcon: $('pause-icon'),
+    seekForward: $('seek-fwd-btn'),
+    position: $('playback-position'),
+    volumeControl: $('volume-control'),
+    muteBtn: $('mute-btn'),
+    volumeIcon: $('volume-icon'),
+    mutedIcon: $('muted-icon'),
+    volumeSlider: $('volume-slider'),
+    volumeNote: $('volume-note')
+};
 export const stat = {
     resolution: $('stat-resolution'),
     bitrate: $('stat-bitrate'),
@@ -50,7 +84,8 @@ export const stat = {
     frameRate: $('stat-framerate'),
     segments: $('stat-segments'),
     cache: $('stat-cache'),
-    bufferHealth: $('stat-buffer-health')
+    bufferHealth: $('stat-buffer-health'),
+    bufferDetail: $('stat-buffer-detail')
 };
 
 // PIN pairing modal

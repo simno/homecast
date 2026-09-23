@@ -1,10 +1,11 @@
 // Live updates from the server: devices, playback, stats, health, subtitles.
 import { state } from './state.js';
-import { updateStatus, handleStreamRecovery } from './status.js';
+import { updateStatus } from './status.js';
 import { updateDeviceList, findDeviceName, deviceTypeOf } from './devices.js';
 import { createStreamEntry, removeStreamEntry, renderStreamBar, setMode, setStreamHealth } from './streams.js';
-import { renderStats, renderBufferHealth } from './dashboard.js';
+import { renderStats, renderBufferHealth, setStreamNotice } from './dashboard.js';
 import { renderDashboardSubtitles } from './subtitles.js';
+import { applyPlayerStatus, renderPlayback } from './playback.js';
 
 function onStreamStats(data) {
     const stream = state.streams.get(data.deviceIp);
@@ -55,7 +56,10 @@ function onPlayerStatus(data) {
             renderStreamBar();
         }
 
+        const entry = state.streams.get(ip);
+        applyPlayerStatus(entry, data.status);
         if (ip === state.activeStreamIp) {
+            renderPlayback(entry);
             if (playerState === 'PLAYING') updateStatus('Now Playing', 'success');
             else if (playerState === 'BUFFERING') updateStatus('Buffering...', 'loading');
             else if (playerState === 'PAUSED') updateStatus('Paused', 'info');
@@ -63,6 +67,40 @@ function onPlayerStatus(data) {
     } else if (playerState === 'IDLE' && stream) {
         removeStreamEntry(ip);
     }
+}
+
+// Recovery runs whichever stream is being viewed, so it's reported on the
+// stream itself: its pill and, when viewed, the dashboard banner.
+function onStreamRecovery(data) {
+    const ip = data.deviceIp;
+    if (!state.streams.has(ip)) return;
+    console.log('[Recovery]', data);
+    if (data.status === 'attempting') {
+        setStreamHealth(ip, 'reconnecting');
+        setStreamNotice(ip, { type: 'warning', message: `Playback stalled. Restarting the stream (attempt ${data.attempt} of ${data.maxAttempts})…` });
+    } else if (data.status === 'success') {
+        setStreamHealth(ip, 'healthy');
+        setStreamNotice(ip, { type: 'success', message: 'Stream restarted and playing again.' });
+    } else if (data.status === 'failed') {
+        setStreamNotice(ip, { type: 'warning', message: `Restart attempt ${data.attempt} failed. Trying again shortly…` });
+    } else if (data.status === 'giveup') {
+        setStreamHealth(ip, 'failed');
+        setStreamNotice(ip, { type: 'error', message: 'HomeCast could not restart this stream. Stop it and cast again.' });
+    }
+}
+
+function onConnectionHealth(data) {
+    setStreamHealth(data.deviceIp, data.state);
+    if (data.state === 'failed') {
+        setStreamNotice(data.deviceIp, { type: 'error', message: data.message || 'Lost the connection to the device.' });
+    }
+}
+
+function onVolume(data) {
+    const stream = state.streams.get(data.deviceIp);
+    if (!stream) return;
+    stream.volume = data.volume;
+    if (data.deviceIp === state.activeStreamIp) renderPlayback(stream);
 }
 
 function onSubtitleTracks(data) {
@@ -80,10 +118,9 @@ const handlers = {
     status: (data) => updateStatus(data.status, 'info'),
     streamStats: onStreamStats,
     playerStatus: onPlayerStatus,
-    connectionHealth: (data) => setStreamHealth(data.deviceIp, data.state),
-    streamRecovery: (data) => {
-        if (data.deviceIp === state.activeStreamIp) handleStreamRecovery(data);
-    },
+    connectionHealth: onConnectionHealth,
+    streamRecovery: onStreamRecovery,
+    volume: onVolume,
     subtitleTracks: onSubtitleTracks,
     pairingStatus: (data) => {
         if (data.status === 'paired') state.pairedDevices.add(data.deviceIp);

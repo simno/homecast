@@ -21,6 +21,7 @@ export const state = {
     activeStreamIp: null,       // currently viewed stream
     compose: {
         analyzedStreams: [],
+        title: null,            // the analysed page's title
         status: null
     },
     pairedDevices: new Set()    // IPs of known-paired devices from server

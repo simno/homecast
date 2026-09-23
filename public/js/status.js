@@ -12,16 +12,3 @@ export function updateStatus(message, type = 'info') {
     else if (type === 'success') statusSuccess.classList.remove('hidden');
     else if (type === 'error') statusError.classList.remove('hidden');
 }
-
-export function handleStreamRecovery(data) {
-    console.log('[Recovery]', data);
-    if (data.status === 'attempting') {
-        updateStatus(`Recovering stream (attempt ${data.attempt}/${data.maxAttempts})...`, 'loading');
-    } else if (data.status === 'success') {
-        updateStatus('Stream recovered successfully', 'success');
-    } else if (data.status === 'failed') {
-        updateStatus(`Recovery attempt ${data.attempt} failed`, 'error');
-    } else if (data.status === 'giveup') {
-        updateStatus('Stream recovery failed - please restart manually', 'error');
-    }
-}

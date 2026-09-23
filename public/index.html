@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HomeCast - Stream to Chromecast</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400;1,500&display=swap" rel="stylesheet">
+    <link rel="preload" href="fonts/roboto-flex-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="style.css">
     <meta name="description" content="Self-hosted streaming to your Chromecast devices">
 
@@ -67,10 +65,23 @@
 
                     <!-- Device -->
                     <label class="field-label" for="device-select">Device</label>
-                    <select id="device-select" aria-label="Select Device">
-                        <option value="" disabled selected>Scanning for devices...</option>
-                        <option value="manual">Enter IP Manually...</option>
-                    </select>
+                    <div class="device-row">
+                        <select id="device-select" aria-describedby="device-hint">
+                            <option value="" disabled selected>Scanning for devices…</option>
+                            <option value="manual">Enter IP Manually...</option>
+                        </select>
+                        <button id="rescan-btn" class="icon-btn" type="button" title="Scan for devices again" aria-label="Scan for devices again">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10"/>
+                                <polyline points="1 20 1 14 7 14"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="device-hint" class="device-hint hidden" aria-live="polite">
+                        <span id="device-hint-text"></span>
+                        <button id="manual-ip-link" class="link-btn hidden" type="button">enter its IP address</button>
+                    </div>
 
                     <div id="manual-ip-container" class="manual-ip-box hidden">
                         <label for="manual-ip">Device IP Address:</label>
@@ -88,6 +99,24 @@
                             </svg>
                             <span id="analyze-btn-label">Analyze</span>
                         </button>
+                    </div>
+
+                    <!-- Recently cast URLs (shown while the URL field is empty) -->
+                    <div id="recent-urls" class="recent hidden">
+                        <div class="recent-header">
+                            <span class="recent-title">Recent</span>
+                            <button id="recent-clear" class="link-btn" type="button">Clear</button>
+                        </div>
+                        <ul id="recent-list" class="recent-list"></ul>
+                    </div>
+
+                    <!-- Preview of the analysed page's video -->
+                    <div id="video-preview" class="video-preview hidden">
+                        <img id="video-preview-img" class="video-preview-img hidden" alt="">
+                        <div class="video-preview-text">
+                            <div id="video-preview-title" class="video-preview-title"></div>
+                            <div id="video-preview-host" class="video-preview-host"></div>
+                        </div>
                     </div>
 
                     <!-- Stream results -->
@@ -112,22 +141,19 @@
                         </div>
                     </div>
 
-                    <!-- Proxy + Cast row -->
+                    <!-- Settings most people never need -->
+                    <details id="advanced-options" class="advanced">
+                        <summary>Advanced<span id="advanced-note" class="advanced-note hidden"> · proxy off</span></summary>
+                        <div class="advanced-body">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="use-proxy" checked aria-describedby="proxy-note">
+                                <span>Proxy stream</span>
+                            </label>
+                            <p id="proxy-note" class="field-note">Recommended. Fixes CORS errors and enables HLS streaming. Turn it off only if the device can reach the video directly.</p>
+                        </div>
+                    </details>
+
                     <div class="compose-actions">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="use-proxy" checked>
-                            <span>
-                                Proxy Stream
-                                <span class="tooltip" tabindex="0" role="button" aria-label="About proxy streaming">
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <circle cx="12" cy="12" r="10"/>
-                                        <line x1="12" y1="11" x2="12" y2="16"/>
-                                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                                    </svg>
-                                    <span class="tooltip-text" role="tooltip">Recommended: Fixes CORS issues and enables HLS streaming</span>
-                                </span>
-                            </span>
-                        </label>
                         <button id="cast-btn" class="btn-primary" disabled>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
@@ -179,46 +205,106 @@
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="6" y="6" width="12" height="12"/>
                                 </svg>
-                                Stop
+                                <span id="stop-btn-label">Stop</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Stats grid: 4 columns -->
+                    <!-- Recovery progress and errors for the stream being viewed -->
+                    <div id="dashboard-notice" class="notice hidden" role="status" aria-live="polite">
+                        <span id="dashboard-notice-text" class="notice-text"></span>
+                        <button id="dashboard-notice-close" class="notice-close" type="button" aria-label="Dismiss">&times;</button>
+                    </div>
+
+                    <!-- Remote control -->
+                    <div class="playback-card">
+                        <div class="transport">
+                            <button id="seek-back-btn" class="icon-btn" type="button" title="Back 10 seconds" aria-label="Back 10 seconds">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 12a9 9 0 1 0 3-6.7"/>
+                                    <polyline points="3 3 3 9 9 9"/>
+                                    <text x="12" y="15.5" text-anchor="middle" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">10</text>
+                                </svg>
+                            </button>
+                            <button id="play-pause-btn" class="play-btn" type="button" title="Pause" aria-label="Pause">
+                                <svg id="pause-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="5" width="4" height="14" rx="1"/>
+                                    <rect x="14" y="5" width="4" height="14" rx="1"/>
+                                </svg>
+                                <svg id="play-icon" class="hidden" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/>
+                                </svg>
+                            </button>
+                            <button id="seek-fwd-btn" class="icon-btn" type="button" title="Forward 30 seconds" aria-label="Forward 30 seconds">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 12a9 9 0 1 1-3-6.7"/>
+                                    <polyline points="21 3 21 9 15 9"/>
+                                    <text x="12" y="15.5" text-anchor="middle" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">30</text>
+                                </svg>
+                            </button>
+                            <span id="playback-position" class="playback-position" aria-live="off"></span>
+                        </div>
+                        <div id="volume-control" class="volume">
+                            <button id="mute-btn" class="icon-btn" type="button" title="Mute" aria-label="Mute">
+                                <svg id="volume-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/>
+                                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                                </svg>
+                                <svg id="muted-icon" class="hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/>
+                                    <line x1="22" y1="9" x2="16" y2="15"/>
+                                    <line x1="16" y1="9" x2="22" y2="15"/>
+                                </svg>
+                            </button>
+                            <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" step="1" value="50" aria-label="Volume">
+                        </div>
+                        <p id="volume-note" class="volume-note hidden">Use the Apple TV remote for volume</p>
+                    </div>
+
+                    <!-- Headline stats -->
                     <div class="stats-grid-4">
+                        <div class="stat-tile stat-tile-quality">
+                            <span class="stat-label">Playback Quality</span>
+                            <span class="stat-value stat-value-lg" id="stat-buffer-health">–</span>
+                            <span class="stat-sub" id="stat-buffer-detail">Waiting for data</span>
+                        </div>
                         <div class="stat-tile">
                             <span class="stat-label">Resolution</span>
                             <span class="stat-value" id="stat-resolution">Unknown</span>
                         </div>
                         <div class="stat-tile">
                             <span class="stat-label">Bitrate</span>
-                            <span class="stat-value" id="stat-bitrate">- Kbps</span>
+                            <span class="stat-value" id="stat-bitrate">–</span>
                         </div>
                         <div class="stat-tile">
-                            <span class="stat-label">Transferred</span>
-                            <span class="stat-value" id="stat-transferred">0 MB</span>
-                        </div>
-                        <div class="stat-tile">
-                            <span class="stat-label">Duration</span>
+                            <span class="stat-label">Playing For</span>
                             <span class="stat-value" id="stat-duration">0s</span>
                         </div>
-                        <div class="stat-tile">
-                            <span class="stat-label">Frame Rate</span>
-                            <span class="stat-value" id="stat-framerate">-</span>
-                        </div>
-                        <div class="stat-tile">
-                            <span class="stat-label">Segments</span>
-                            <span class="stat-value" id="stat-segments">0</span>
-                        </div>
-                        <div class="stat-tile">
-                            <span class="stat-label">Cache Hits</span>
-                            <span class="stat-value" id="stat-cache">0</span>
-                        </div>
-                        <div class="stat-tile">
-                            <span class="stat-label">Playback Quality</span>
-                            <span class="stat-value" id="stat-buffer-health">-</span>
-                        </div>
                     </div>
+
+                    <!-- Technical stats, collapsed by default -->
+                    <details id="stats-details" class="stats-details">
+                        <summary>More stats</summary>
+                        <div class="stats-grid-4">
+                            <div class="stat-tile">
+                                <span class="stat-label">Transferred</span>
+                                <span class="stat-value" id="stat-transferred">0 MB</span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">Frame Rate</span>
+                                <span class="stat-value" id="stat-framerate">–</span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">Segments</span>
+                                <span class="stat-value" id="stat-segments">0</span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">Cache Hits</span>
+                                <span class="stat-value" id="stat-cache">0</span>
+                            </div>
+                        </div>
+                    </details>
 
                     <!-- Graphs row: side by side on desktop -->
                     <div class="graphs-row">
@@ -239,7 +325,7 @@
 
                         <div id="delay-graph-section" class="graph-section hidden">
                             <div class="graph-header">
-                                <strong>Stream Delay</strong>
+                                <strong title="How far playback is behind the live broadcast">Behind Live</strong>
                                 <span id="graph-current-delay" class="graph-current-value graph-delay-value">0.0s</span>
                             </div>
                             <div class="graph-container">
@@ -277,8 +363,8 @@
                        autocomplete="off" placeholder="1234">
                 <div id="pin-status" class="pin-status hidden" aria-live="polite"></div>
                 <div class="pin-actions">
-                    <button id="pin-cancel-btn" class="btn-secondary" style="flex: 1;">Cancel</button>
-                    <button id="pin-submit-btn" class="btn-primary" style="flex: 2;" disabled>Pair</button>
+                    <button id="pin-cancel-btn" class="btn-secondary">Cancel</button>
+                    <button id="pin-submit-btn" class="btn-primary" disabled>Pair</button>
                 </div>
             </div>
         </div>
@@ -293,15 +379,17 @@
             <div class="modal-body">
                 <h3>Quick Start</h3>
                 <ol>
-                    <li>Select your Chromecast device from the dropdown</li>
-                    <li>Paste a video URL or webpage containing a video</li>
-                    <li>Click "Analyze" to extract the video source</li>
+                    <li>Select your Chromecast or Apple TV from the dropdown</li>
+                    <li>Paste a video URL or a webpage containing a video (it's analyzed straight away)</li>
                     <li>Click "Start Casting" to begin playback</li>
+                    <li>Pause, skip and change the volume from the dashboard</li>
                 </ol>
 
                 <h3>Tips</h3>
                 <ul>
-                    <li><strong>Proxy Stream:</strong> Keep this enabled for most videos. It fixes CORS issues and enables HLS/m3u8 streaming.</li>
+                    <li><strong>Proxy stream</strong> (under Advanced): Keep this on for most videos. It fixes CORS errors and enables HLS/m3u8 streaming.</li>
+                    <li><strong>Recent:</strong> Videos you've cast are listed under the URL field. Click one to analyze it again.</li>
+                    <li><strong>Stopping:</strong> Stop and the × on a stream ask you to click again to confirm, so a stray click doesn't end playback.</li>
                     <li><strong>Subtitles:</strong> Subtitles found with a video can be picked before casting, or add a WebVTT/SRT file by URL. On a Chromecast you can switch them or turn them off while playing; on Apple TV, use the TV remote.</li>
                     <li><strong>Manual IP:</strong> If your device isn't found, select "Enter IP Manually" and enter the Chromecast's IP address.</li>
                     <li><strong>Supported Formats:</strong> MP4, WebM, HLS (m3u8), and many streaming services.</li>
@@ -309,8 +397,8 @@
 
                 <h3>Troubleshooting</h3>
                 <ul>
-                    <li><strong>No devices found:</strong> Ensure Chromecast and server are on the same network.</li>
-                    <li><strong>Video doesn't play:</strong> Try enabling "Proxy Stream" option.</li>
+                    <li><strong>No devices found:</strong> Ensure the device and the server are on the same network, then press the rescan button next to the device list.</li>
+                    <li><strong>Video doesn't play:</strong> Check that "Proxy stream" under Advanced is on.</li>
                     <li><strong>Connection issues:</strong> Check firewall and network settings.</li>
                 </ul>
             </div>

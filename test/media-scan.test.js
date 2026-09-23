@@ -290,3 +290,18 @@ test('labels resolution by the short side', () => {
     assert.strictEqual(scan.resolutionLabel(3840, 2160), '4K');
 });
 
+// --- Thumbnail ---
+
+test('the share-card image is the thumbnail, resolved against the page', () => {
+    const doc = scan.scanDocument('<meta property="og:image" content="/img/cover.jpg"><video src="a.mp4" poster="p.jpg"></video>', PAGE);
+    assert.strictEqual(doc.thumbnail, 'https://site.example/img/cover.jpg');
+});
+
+test('without a share card the poster frame is the thumbnail', () => {
+    const doc = scan.scanDocument('<video src="a.mp4" poster="p.jpg"></video>', PAGE);
+    assert.strictEqual(doc.thumbnail, 'https://site.example/shows/p.jpg');
+});
+
+test('a page without either has no thumbnail', () => {
+    assert.strictEqual(scan.scanDocument('<video src="a.mp4"></video>', PAGE).thumbnail, null);
+});

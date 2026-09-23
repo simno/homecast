@@ -439,6 +439,32 @@ async function serveSubtitle(res, { url, headers }) {
     return res.send(vtt);
 }
 
+// The video's thumbnail for the cast form's preview. Only images are passed
+// on, so this can't be used to fetch anything else through the page's origin.
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+async function serveImage(res, { url, headers }) {
+    const response = await fetchUpstream(url, headers, {
+        method: 'get',
+        responseType: 'arraybuffer',
+        httpAgent: httpAgent,
+        httpsAgent: httpsAgent,
+        timeout: 10000,
+        maxContentLength: IMAGE_MAX_BYTES,
+        validateStatus: (status) => status < 500
+    });
+
+    if (response.status >= 400) {
+        return res.status(response.status).json({ error: `Upstream error: ${response.status}` });
+    }
+    const contentType = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (!/^image\/(jpeg|png|gif|webp|avif)$/.test(contentType)) {
+        return res.status(415).json({ error: 'Not an image' });
+    }
+    res.set({ 'Content-Type': contentType, 'Cache-Control': 'private, max-age=3600' });
+    return res.send(Buffer.from(response.data));
+}
+
 // --- API: Proxy Stream ---
 router.get('/proxy', proxyLimiter, async (req, res) => {
     const { url, referer } = req.query;
@@ -452,7 +478,10 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
     if (!url) return res.status(400).json({ error: 'URL parameter required' });
 
-    const { deviceIp, stats } = trackClient(clientIp);
+    // Thumbnails are fetched by the browser, not a cast device: don't track
+    // the page as a streaming client.
+    const isImage = req.query.type === 'image';
+    const { deviceIp, stats } = isImage ? {} : trackClient(clientIp);
 
     // Security: Validate URL for SSRF protection
     const validation = await validateProxyUrl(url);
@@ -476,6 +505,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         if (req.query.type === 'subtitle') {
             return await serveSubtitle(res, { url, headers });
+        }
+        if (isImage) {
+            return await serveImage(res, { url, headers });
         }
 
         // `type` comes from the extractor (it sniffed the response) or from a

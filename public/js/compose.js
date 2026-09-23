@@ -3,7 +3,8 @@
 import {
     composePanel, composeOverlay, videoUrlInput, analyzeBtn, analyzeBtnLabel,
     resolvedUrlContainer, streamsFoundText, streamOptionsContainer,
-    qualitySelectRow, qualitySelect, useProxyCheckbox, castBtn, castBtnLabel, statusCard
+    qualitySelectRow, qualitySelect, useProxyCheckbox, castBtn, castBtnLabel, statusCard,
+    videoPreview, videoPreviewImg, videoPreviewTitle, videoPreviewHost
 } from './dom.js';
 import { state, saveState } from './state.js';
 import { apiPost } from './api.js';
@@ -16,6 +17,7 @@ import { showPinPrompt } from './pairing.js';
 import {
     populateSubtitleOptions, subtitleChoiceReady, selectedSubtitle, rememberSubtitleChoice
 } from './subtitles.js';
+import { addRecent, rememberDevice, renderRecent } from './recent.js';
 
 // ===== FORM STATE =====
 
@@ -25,11 +27,13 @@ export function resetComposeForm() {
     resolvedUrlContainer.classList.add('hidden');
     streamOptionsContainer.innerHTML = '';
     statusCard.classList.add('hidden');
+    showPreview(null);
     populateSubtitleOptions(null);
     setCastButton({ busy: false });
     castBtn.disabled = true;
     state.compose.analyzedStreams = [];
     state.compose.status = null;
+    renderRecent();
 }
 
 export function openComposeOverlay() {
@@ -116,15 +120,46 @@ async function readExtractResponse(res, onProgress) {
     return result || { error: 'The server closed the connection unexpectedly' };
 }
 
+// The page's title and picture, so the user can tell it's the right video
+// before casting. The picture comes through the server (it only passes images).
+function showPreview(data) {
+    const title = data?.title || null;
+    const thumbnail = data?.thumbnail || null;
+    videoPreview.classList.toggle('hidden', !title && !thumbnail);
+    if (!title && !thumbnail) {
+        videoPreviewImg.removeAttribute('src');
+        return;
+    }
+
+    videoPreviewTitle.textContent = title || 'Untitled video';
+    try {
+        videoPreviewHost.textContent = new URL(videoUrlInput.value.trim()).hostname.replace(/^www\./, '');
+    } catch {
+        videoPreviewHost.textContent = '';
+    }
+
+    videoPreviewImg.classList.add('hidden');
+    if (thumbnail) {
+        const params = new URLSearchParams({ url: thumbnail, referer: videoUrlInput.value.trim(), type: 'image' });
+        videoPreviewImg.onload = () => videoPreviewImg.classList.remove('hidden');
+        videoPreviewImg.onerror = () => videoPreviewImg.classList.add('hidden');
+        videoPreviewImg.src = `/proxy?${params}`;
+    } else {
+        videoPreviewImg.removeAttribute('src');
+    }
+}
+
 function showAnalyzeResult(data) {
     const videos = data.videos || [];
     const playableCount = videos.filter(v => !v.unsupported).length;
-    const onPage = data.title ? ` · ${data.title.length > 60 ? data.title.slice(0, 57) + '…' : data.title}` : '';
+    state.compose.title = data.title || null;
+
+    if (videos.length > 0) showPreview(data);
 
     if (playableCount > 0) {
         state.compose.analyzedStreams = videos;
         displayStreamOptions(videos);
-        updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}${onPage}`, 'success');
+        updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}`, 'success');
         checkReady();
     } else if (videos.length > 0) {
         // Streams were found but none are playable (e.g. MJPEG only) —
@@ -162,11 +197,14 @@ export async function fetchAndAnalyze({ restart = false } = {}) {
 
     // Clear the previous result so a stale stream can't be cast by mistake.
     state.compose.analyzedStreams = [];
+    state.compose.title = null;
     streamOptionsContainer.innerHTML = '';
     resolvedUrlContainer.classList.add('hidden');
     qualitySelectRow.classList.add('hidden');
+    showPreview(null);
     populateSubtitleOptions(null);
     checkReady();
+    renderRecent();
 
     try {
         const res = await apiPost('/api/extract', { url }, { signal: controller.signal, accept: 'application/x-ndjson' });
@@ -224,7 +262,6 @@ function displayStreamOptions(videos) {
         const label = document.createElement('label');
         label.setAttribute('for', `stream-${index}`);
         label.className = 'stream-option-content';
-        label.style.cursor = video.unsupported ? 'not-allowed' : 'pointer';
 
         const urlSpan = document.createElement('div');
         urlSpan.className = 'stream-option-url';
@@ -299,7 +336,8 @@ function populateQualityOptions(video) {
 // Shared by startCasting() and the retry after AirPlay pairing — both POST
 // the same params to /api/cast and handle the same needsPairing/error/success
 // shapes, so a fix to one path can't silently miss the other.
-async function performCast(params, { loadingMessage, allowPairingRetry }) {
+// `page`: the URL and title the user analysed, remembered as a recent cast.
+async function performCast(params, { loadingMessage, allowPairingRetry, page }) {
     castBtn.disabled = true;
     setCastButton({ busy: true });
     updateStatus(loadingMessage, 'loading');
@@ -310,7 +348,7 @@ async function performCast(params, { loadingMessage, allowPairingRetry }) {
 
         if (data.needsPairing && allowPairingRetry) {
             showPinPrompt(data.deviceIp, data.deviceName, () => {
-                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false });
+                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false, page });
             });
             castBtn.disabled = false;
             setCastButton({ busy: false });
@@ -322,6 +360,8 @@ async function performCast(params, { loadingMessage, allowPairingRetry }) {
         }
 
         rememberSubtitleChoice(params.subtitle);
+        rememberDevice(params.ip);
+        if (page?.url) addRecent(page.url, page.title);
         // A manually entered IP may still be a discovered device of known type.
         const deviceType = state.devices.find(d => d.ip === params.ip)?.type || params.deviceType;
         createStreamEntry(params.ip, findDeviceName(params.ip), deviceType);
@@ -360,6 +400,7 @@ export async function startCasting() {
         subtitle: selectedSubtitle()
     }, {
         loadingMessage: 'Connecting to device...',
-        allowPairingRetry: true
+        allowPairingRetry: true,
+        page: { url: videoUrlInput.value.trim(), title: state.compose.title }
     });
 }

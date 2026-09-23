@@ -1,7 +1,7 @@
 const express = require('express');
 const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, devices } = require('../lib/state');
-const { castToDevice, stopCasting } = require('../lib/cast');
-const { castToAirPlayDevice, stopAirPlayCasting } = require('../lib/airplay');
+const { castToDevice, stopCasting, controlPlayback } = require('../lib/cast');
+const { castToAirPlayDevice, stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
 
 const router = express.Router();
@@ -103,7 +103,8 @@ router.get('/api/session/:ip', (req, res) => {
             stats: stats || null,
             tracking: tracking || null,
             hasPlayer: !!session.player,
-            subtitles: subtitleState(ip)
+            subtitles: subtitleState(ip),
+            volume: session.volume || null
         });
     }
 
@@ -154,6 +155,45 @@ router.post('/api/stop', async (req, res) => {
     } catch (err) {
         console.error('[Stop] Error stopping playback:', err);
         res.status(500).json({ error: 'Failed to stop playback: ' + err.message });
+    }
+});
+
+// --- API: Playback Control ---
+// action: 'pause' | 'play' | 'seek' (value: seconds to skip, -3600..3600)
+// | 'volume' (value: 0-1, Chromecast only) | 'mute' (value: boolean, Chromecast only)
+function validPlaybackValue(action, value) {
+    if (action === 'pause' || action === 'play') return true;
+    if (action === 'seek') return Number.isFinite(value) && Math.abs(value) <= 3600;
+    if (action === 'volume') return Number.isFinite(value) && value >= 0 && value <= 1;
+    if (action === 'mute') return typeof value === 'boolean';
+    return false;
+}
+
+router.post('/api/playback', async (req, res) => {
+    const { ip, action, value } = req.body;
+    if (!validateIp(ip)) {
+        return res.status(400).json({ error: 'Invalid or missing IP address' });
+    }
+    if (!validPlaybackValue(action, value)) {
+        return res.status(400).json({ error: 'Invalid playback action' });
+    }
+
+    const airplay = activeAirPlaySessions.has(ip);
+    if (!airplay && !activeSessions.has(ip)) {
+        return res.status(404).json({ error: 'No active session found for this device' });
+    }
+    if (airplay && (action === 'volume' || action === 'mute')) {
+        return res.status(400).json({ error: 'Set the volume with the Apple TV remote' });
+    }
+
+    try {
+        const result = airplay
+            ? await controlAirPlayPlayback(ip, action, value)
+            : await controlPlayback(ip, action, value);
+        res.json(result);
+    } catch (err) {
+        console.error(`[Playback] ${action} failed on ${ip}:`, err.message);
+        res.status(502).json({ error: `Could not ${action === 'play' ? 'resume' : action}: ${err.message}` });
     }
 });
 

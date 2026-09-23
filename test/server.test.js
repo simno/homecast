@@ -65,7 +65,7 @@ test('the device list is readable without a CSRF token', async () => {
 
 // Includes a route that doesn't exist: protection is the default for /api,
 // not a list someone has to remember to extend.
-for (const path of ['/api/cast', '/api/stop', '/api/extract', '/api/subtitles', '/api/airplay/pair/192.168.1.50',
+for (const path of ['/api/cast', '/api/stop', '/api/extract', '/api/subtitles', '/api/playback', '/api/devices/rescan', '/api/airplay/pair/192.168.1.50',
     '/api/airplay/unpair/192.168.1.50', '/api/some-future-route']) {
     test(`POST ${path} without a CSRF token is refused`, async () => {
         const res = await postJson(path, {});
@@ -166,4 +166,38 @@ test('a WebSocket from another origin is closed with 1008', async () => {
 
 test('a same-origin WebSocket stays open', async () => {
     assert.strictEqual(await wsOutcome(base), 'open');
+});
+
+// --- Playback control and rescan ---
+
+test('playback control rejects actions and values it does not know', async () => {
+    const auth = await csrf();
+    for (const body of [
+        { ip: '192.168.1.50', action: 'rewind' },
+        { ip: '192.168.1.50', action: 'seek', value: 'soon' },
+        { ip: '192.168.1.50', action: 'volume', value: 2 },
+        { ip: '192.168.1.50', action: 'mute', value: 'yes' },
+        { ip: 'not-an-ip', action: 'pause' }
+    ]) {
+        const res = await postJson('/api/playback', body, auth);
+        assert.strictEqual(res.status, 400, JSON.stringify(body));
+    }
+});
+
+test('playback control on a device with nothing playing is a 404', async () => {
+    const res = await postJson('/api/playback', { ip: '192.168.1.50', action: 'pause' }, await csrf());
+    assert.strictEqual(res.status, 404);
+});
+
+test('a rescan is accepted', async () => {
+    const res = await postJson('/api/devices/rescan', {}, await csrf());
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).status, 'scanning');
+});
+
+test('the CSP no longer allows a font CDN: fonts are bundled', async () => {
+    const csp = (await fetch(`${base}/`)).headers.get('content-security-policy');
+    assert.doesNotMatch(csp, /googleapis|gstatic/);
+    const font = await fetch(`${base}/fonts/roboto-flex-latin.woff2`);
+    assert.strictEqual(font.status, 200);
 });
