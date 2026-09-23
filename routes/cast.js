@@ -2,6 +2,7 @@ const express = require('express');
 const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, devices } = require('../lib/state');
 const { castToDevice, stopCasting } = require('../lib/cast');
 const { castToAirPlayDevice, stopAirPlayCasting } = require('../lib/airplay');
+const { subtitleState, selectSubtitle } = require('../lib/subtitles');
 
 const router = express.Router();
 
@@ -39,6 +40,24 @@ function validateUrl(url) {
     }
 }
 
+const shortText = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 100) : null);
+
+// The subtitle choice sent with a cast: null (off), a file to sideload
+// ({ url, language?, label? }) or a manifest rendition ({ language?, label? }).
+// Returns undefined when the value is present but malformed.
+function normalizeSubtitle(subtitle) {
+    if (subtitle === undefined || subtitle === null) return null;
+    if (typeof subtitle !== 'object' || Array.isArray(subtitle)) return undefined;
+    const language = shortText(subtitle.language);
+    const label = shortText(subtitle.label);
+    if (subtitle.url !== undefined) {
+        if (!validateUrl(subtitle.url) || subtitle.url.length > 4096) return undefined;
+        return { url: subtitle.url, language, label };
+    }
+    if (!language && !label) return undefined;
+    return { language, label };
+}
+
 // --- API: Cast ---
 router.post('/api/cast', (req, res) => {
     const { ip, url, proxy, referer, deviceType } = req.body;
@@ -52,16 +71,21 @@ router.post('/api/cast', (req, res) => {
     if (!validateUrl(url)) {
         return res.status(400).json({ error: 'Invalid or missing URL. Only http and https protocols are allowed.' });
     }
+    const subtitle = normalizeSubtitle(req.body.subtitle);
+    if (subtitle === undefined) {
+        return res.status(400).json({ error: 'Invalid subtitle choice' });
+    }
 
     // Route to AirPlay or Chromecast based on device type
     if (deviceType === 'airplay' || (devices.get(ip)?.type === 'airplay')) {
         if (type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url))) {
             return res.status(400).json({ error: 'Apple TV cannot play DASH streams. Cast this one to a Chromecast, or pick an HLS or MP4 stream.' });
         }
+        // AirPlay 1 can't sideload text tracks; HLS subtitles are picked on the Apple TV itself.
         return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
     }
 
-    castToDevice(ip, url, !!proxy, referer || '', quality, res, type);
+    castToDevice(ip, url, !!proxy, referer || '', quality, res, type, subtitle);
 });
 
 // --- API: Get Session State ---
@@ -78,7 +102,8 @@ router.get('/api/session/:ip', (req, res) => {
             type: 'chromecast',
             stats: stats || null,
             tracking: tracking || null,
-            hasPlayer: !!session.player
+            hasPlayer: !!session.player,
+            subtitles: subtitleState(ip)
         });
     }
 
@@ -129,6 +154,33 @@ router.post('/api/stop', async (req, res) => {
     } catch (err) {
         console.error('[Stop] Error stopping playback:', err);
         res.status(500).json({ error: 'Failed to stop playback: ' + err.message });
+    }
+});
+
+// --- API: Switch Subtitles (Chromecast) ---
+// trackId: one of the session's text tracks, or null for off.
+router.post('/api/subtitles', async (req, res) => {
+    const { ip, trackId } = req.body;
+    if (!validateIp(ip)) {
+        return res.status(400).json({ error: 'Invalid or missing IP address' });
+    }
+    if (activeAirPlaySessions.has(ip)) {
+        return res.status(400).json({ error: 'Choose subtitles on the Apple TV itself' });
+    }
+    if (!activeSessions.has(ip)) {
+        return res.status(404).json({ error: 'No active session found for this device' });
+    }
+    const { tracks } = subtitleState(ip);
+    if (trackId !== null && !tracks.some(t => t.trackId === trackId)) {
+        return res.status(400).json({ error: 'Unknown subtitle track' });
+    }
+
+    try {
+        await selectSubtitle(ip, trackId);
+        res.json(subtitleState(ip));
+    } catch (err) {
+        console.error('[Subtitles] Switch failed:', err.message);
+        res.status(502).json({ error: 'Could not switch subtitles: ' + err.message });
     }
 });
 

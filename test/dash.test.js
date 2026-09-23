@@ -58,6 +58,23 @@ test('type="dynamic" is live; ContentProtection is DRM', () => {
     assert.strictEqual(dash.describeMpd(mpd({ drm: true })).drm, true);
 });
 
+test('text AdaptationSets are listed as subtitles, audio and video are not', () => {
+    const withText = mpd().replace('</Period>', `
+    <AdaptationSet contentType="text" mimeType="text/vtt" lang="fr">
+      <Label>Français</Label>
+      <Representation id="t-fr" bandwidth="256"><BaseURL>subs/fr.vtt</BaseURL></Representation>
+    </AdaptationSet>
+    <AdaptationSet mimeType="application/mp4" codecs="stpp" lang="de">
+      <Representation id="t-de" bandwidth="256"/>
+    </AdaptationSet>
+  </Period>`);
+    assert.deepStrictEqual(dash.describeMpd(withText).subtitles, [
+        { language: 'fr', label: 'Français' },
+        { language: 'de', label: 'de' }
+    ]);
+    assert.deepStrictEqual(dash.describeMpd(mpd()).subtitles, []);
+});
+
 test('anything that is not an MPD is rejected', () => {
     assert.strictEqual(dash.describeMpd('#EXTM3U\n'), null);
     assert.strictEqual(dash.describeMpd('<html><body>MPD</body></html>'), null);

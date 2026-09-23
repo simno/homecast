@@ -102,6 +102,13 @@
                                 <label class="field-label" for="quality-select">Quality</label>
                                 <select id="quality-select" aria-label="Stream quality"></select>
                             </div>
+                            <div id="subtitle-select-row" class="quality-row hidden">
+                                <label class="field-label" for="subtitle-select">Subtitles</label>
+                                <select id="subtitle-select" aria-describedby="subtitle-note"></select>
+                                <input type="text" id="subtitle-url" class="subtitle-url hidden" inputmode="url" autocomplete="off"
+                                       placeholder="https://example.com/subtitles.vtt or .srt" aria-label="Subtitle file URL">
+                                <div id="subtitle-note" class="field-note hidden"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -164,12 +171,17 @@
                                 <span class="health-text" id="health-text" aria-live="polite">Connected</span>
                             </div>
                         </div>
-                        <button id="stop-btn" class="btn-danger-sm">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="6" y="6" width="12" height="12"/>
-                            </svg>
-                            Stop
-                        </button>
+                        <div class="dashboard-actions">
+                            <div id="dashboard-subtitles" class="dashboard-subtitles hidden">
+                                <select id="dashboard-subtitle-select" aria-label="Subtitles"></select>
+                            </div>
+                            <button id="stop-btn" class="btn-danger-sm">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="6" y="6" width="12" height="12"/>
+                                </svg>
+                                Stop
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Stats grid: 4 columns -->
@@ -290,6 +302,7 @@
                 <h3>Tips</h3>
                 <ul>
                     <li><strong>Proxy Stream:</strong> Keep this enabled for most videos. It fixes CORS issues and enables HLS/m3u8 streaming.</li>
+                    <li><strong>Subtitles:</strong> Subtitles found with a video can be picked before casting, or add a WebVTT/SRT file by URL. On a Chromecast you can switch them or turn them off while playing; on Apple TV, use the TV remote.</li>
                     <li><strong>Manual IP:</strong> If your device isn't found, select "Enter IP Manually" and enter the Chromecast's IP address.</li>
                     <li><strong>Supported Formats:</strong> MP4, WebM, HLS (m3u8), and many streaming services.</li>
                 </ul>
@@ -304,6 +317,6 @@
         </div>
     </div>
 
-    <script type="module" src="script.js"></script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>

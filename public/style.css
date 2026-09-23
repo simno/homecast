@@ -465,6 +465,18 @@ body {
   width: 100%;
 }
 
+.subtitle-url {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.field-note {
+  font: var(--typescale-label-sm);
+  color: var(--md-on-surface-variant);
+  margin-top: 6px;
+}
+
 .compose-actions {
   display: flex;
   align-items: center;
@@ -865,6 +877,19 @@ select:focus {
   border-radius: var(--radius-xl);
   border: 1px solid var(--md-outline-subtle);
   box-shadow: var(--elevation-1);
+}
+
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-subtitles select {
+  width: auto;
+  max-width: 220px;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .dashboard-device-info {

@@ -44,8 +44,10 @@ class MockChromecast extends EventEmitter {
         this.media = {
             contentId: mediaUrl,
             contentType: options.contentType || 'video/mp4',
-            streamType: options.streamType || 'BUFFERED'
+            streamType: options.streamType || 'BUFFERED',
+            tracks: options.tracks || []
         };
+        this.activeTrackIds = options.activeTrackIds || [];
 
         this.currentTime = 0;
         this.playerState = 'BUFFERING';
@@ -385,7 +387,8 @@ class MockChromecast extends EventEmitter {
         const status = {
             playerState: this.playerState,
             currentTime: this.currentTime,
-            media: this.media
+            media: this.media,
+            activeTrackIds: this.activeTrackIds || []
         };
 
         // Add liveSeekableRange for live HLS streams
@@ -457,7 +460,9 @@ class MockPlayer extends EventEmitter {
         setTimeout(() => {
             this.mockDevice.load(media.contentId, {
                 contentType: media.contentType,
-                streamType: media.streamType
+                streamType: media.streamType,
+                tracks: media.tracks,
+                activeTrackIds: options?.activeTrackIds
             });
             callback(null, this.mockDevice.getStatus());
         }, 100);
@@ -480,6 +485,14 @@ class MockPlayer extends EventEmitter {
 
     getStatus(callback) {
         callback(null, this.mockDevice.getStatus());
+    }
+
+    // EDIT_TRACKS_INFO (the real player sends it through its media controller)
+    editTracksInfo(activeTrackIds, callback) {
+        console.log(`[MockCast] Active tracks: ${JSON.stringify(activeTrackIds)}`);
+        this.mockDevice.activeTrackIds = activeTrackIds;
+        this.mockDevice.emit('status', this.mockDevice.getStatus());
+        if (callback) callback(null, this.mockDevice.getStatus());
     }
 }
 

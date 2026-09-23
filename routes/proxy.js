@@ -28,6 +28,7 @@ const {
 } = require('../lib/proxy');
 const { getBufferHealthStats } = require('../lib/stats');
 const { rewriteMpd, describeMpd, dashSegmentUrl, upstreamFromDashPath } = require('../lib/dash');
+const { toWebVtt } = require('../lib/subtitles');
 
 const router = express.Router();
 
@@ -409,6 +410,35 @@ router.get(DASH_SEGMENT_PATH, dashSegmentLimiter, async (req, res) => {
     }
 });
 
+// Subtitle files for sideloaded text tracks, always served as WebVTT: that's
+// the one sidecar format receivers take, and many sites serve SRT.
+const SUBTITLE_MAX_BYTES = 5 * 1024 * 1024;
+
+async function serveSubtitle(res, { url, headers }) {
+    const response = await fetchUpstream(url, headers, {
+        method: 'get',
+        responseType: 'arraybuffer',
+        httpAgent: httpAgent,
+        httpsAgent: httpsAgent,
+        timeout: 15000,
+        maxContentLength: SUBTITLE_MAX_BYTES,
+        validateStatus: (status) => status < 500
+    });
+
+    if (response.status >= 400) {
+        console.error(`[Proxy] Upstream returned ${response.status} for subtitles ${url}`);
+        return res.status(response.status).json({ error: `Upstream error: ${response.status}` });
+    }
+
+    const vtt = toWebVtt(Buffer.from(response.data));
+    if (vtt === null) {
+        console.warn(`[Proxy] Not a WebVTT or SRT file: ${url.substring(0, 80)}`);
+        return res.status(415).json({ error: 'Not a WebVTT or SRT subtitle file' });
+    }
+    res.set('Content-Type', 'text/vtt; charset=utf-8');
+    return res.send(vtt);
+}
+
 // --- API: Proxy Stream ---
 router.get('/proxy', proxyLimiter, async (req, res) => {
     const { url, referer } = req.query;
@@ -443,6 +473,10 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             'User-Agent': USER_AGENT
         };
         if (referer) headers['Referer'] = referer;
+
+        if (req.query.type === 'subtitle') {
+            return await serveSubtitle(res, { url, headers });
+        }
 
         // `type` comes from the extractor (it sniffed the response) or from a
         // parent manifest, and covers manifests whose URL doesn't say so.

@@ -31,6 +31,14 @@ const MASTER = [
     'v/360/index.m3u8',
     ''
 ].join('\n');
+const SUBBED_MASTER = [
+    '#EXTM3U',
+    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=YES,URI="subs/en.m3u8"',
+    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Español",LANGUAGE="es",URI="subs/es.m3u8"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720,SUBTITLES="subs"',
+    'v/720/index.m3u8',
+    ''
+].join('\n');
 const MEDIA = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n#EXT-X-ENDLIST\n';
 
 const pages = {
@@ -51,7 +59,12 @@ const pages = {
     '/pages/nothing.html': '<div id="app"></div><script>boot()</script>',
     '/pages/soft404.html': '<video src="/media/html.mp4"></video><video src="/media/dead.mp4"></video>',
     '/pages/extensionless.html': '<video><source src="/api/stream/7" type="application/x-mpegURL"></video>',
-    '/pages/sniff.html': '<video src="/api/progressive/9"></video>'
+    '/pages/sniff.html': '<video src="/api/progressive/9"></video>',
+    '/pages/tracks.html': `<video src="/media/clip.mp4">
+        <track kind="subtitles" src="subs/en.vtt" srclang="en" label="English">
+        <track kind="captions" src="/subs/de.vtt" srclang="de" label="Deutsch">
+        <track kind="chapters" src="/subs/chapters.vtt" srclang="en">
+    </video>`
 };
 
 let base;
@@ -73,6 +86,10 @@ const server = http.createServer((req, res) => {
     if (path === '/master.m3u8') {
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         return res.end(MASTER);
+    }
+    if (path === '/subbed/master.m3u8') {
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        return res.end(SUBBED_MASTER);
     }
     if (/^\/v\/\d+\/index\.m3u8$/.test(path)) return res.end(MEDIA);
     if (path === '/api/stream/7') {
@@ -114,6 +131,30 @@ async function expectFinderError(promise, status) {
     }
     assert.fail(`expected FinderError ${status}`);
 }
+
+// --- Subtitles ---
+
+test('subtitle renditions in an HLS master are listed for the receiver to pick', async () => {
+    const { videos } = await findStreams(`${base}/subbed/master.m3u8`, noBrowser);
+    assert.deepStrictEqual(videos[0].subtitles, [
+        { source: 'manifest', language: 'en', label: 'English' },
+        { source: 'manifest', language: 'es', label: 'Español' }
+    ]);
+});
+
+test('<track> subtitles and captions on a page come with its video; chapters do not', async () => {
+    const { videos } = await findStreams(`${base}/pages/tracks.html`, noBrowser);
+    assert.strictEqual(videos[0].type, 'mp4');
+    assert.deepStrictEqual(videos[0].subtitles, [
+        { source: 'page', url: `${base}/pages/subs/en.vtt`, language: 'en', label: 'English' },
+        { source: 'page', url: `${base}/subs/de.vtt`, language: 'de', label: 'Deutsch (CC)' }
+    ]);
+});
+
+test('a video without subtitles has no subtitles field', async () => {
+    const { videos } = await findStreams(`${base}/master.m3u8?token=x`, noBrowser);
+    assert.strictEqual(videos[0].subtitles, undefined);
+});
 
 // --- Direct URLs ---
 

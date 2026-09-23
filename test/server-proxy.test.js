@@ -39,6 +39,15 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
         return res.end(MEDIA);
     }
+    if (path === '/show/subs/en.srt') {
+        // Served the way many sites do: SRT, as text/plain, locked to their origin.
+        res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': 'https://site.example' });
+        return res.end('1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n');
+    }
+    if (path === '/show/subs/not-subs.vtt') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end('<html>Login required</html>');
+    }
     if (path === '/show/hi/seg1.ts') {
         const range = /bytes=(\d+)-(\d+)/.exec(req.headers.range || '');
         if (range) {
@@ -133,4 +142,17 @@ test('an upstream playlist error is reported with its status', async () => {
     const res = await proxy(`${cdn}/show/missing.m3u8`);
     assert.strictEqual(res.status, 404);
     assert.match((await res.json()).error, /Upstream error: 404/);
+});
+
+test('subtitles are served as WebVTT, converted from SRT, readable by the receiver', async () => {
+    const res = await proxy(`${cdn}/show/subs/en.srt`, { type: 'subtitle' });
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers.get('content-type'), /^text\/vtt/);
+    assert.strictEqual(res.headers.get('access-control-allow-origin'), '*');
+    assert.strictEqual(await res.text(), 'WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\nHello\n');
+});
+
+test('a subtitle URL that returns something else is refused', async () => {
+    const res = await proxy(`${cdn}/show/subs/not-subs.vtt`, { type: 'subtitle' });
+    assert.strictEqual(res.status, 415);
 });

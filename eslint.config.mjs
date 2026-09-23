@@ -29,6 +29,8 @@ export default [
                 URLSearchParams: 'readonly',
                 AbortController: 'readonly',
                 fetch: 'readonly',
+                TextDecoder: 'readonly',
+                setImmediate: 'readonly',
                 Error: 'readonly',
                 encodeURIComponent: 'readonly',
                 decodeURIComponent: 'readonly'
@@ -79,6 +81,7 @@ export default [
                 clearTimeout: 'readonly',
                 clearInterval: 'readonly',
                 localStorage: 'readonly',
+                navigator: 'readonly',
                 Array: 'readonly',
                 JSON: 'readonly',
                 parseInt: 'readonly',

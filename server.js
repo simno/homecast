@@ -105,12 +105,10 @@ if (CSRF_ENABLED) {
         res.json({ token });
     });
 
-    // Apply CSRF protection to POST endpoints only
-    app.use('/api/cast', doubleCsrfProtection);
-    app.use('/api/stop', doubleCsrfProtection);
-    app.use('/api/extract', doubleCsrfProtection);
-    app.use('/api/airplay/pair', doubleCsrfProtection);
-    app.use('/api/airplay/unpair', doubleCsrfProtection);
+    // Every state-changing API request needs a token, so a new route is
+    // protected without anyone remembering to add it here. GET, HEAD and
+    // OPTIONS pass through (csrf-csrf's default ignoredMethods).
+    app.use('/api', doubleCsrfProtection);
 
     console.log('[Security] CSRF protection enabled');
 } else {
@@ -125,12 +123,19 @@ app.use(statsRouter);
 app.use(proxyRouter);
 app.use(airplayPairingRouter);
 
-// Express error-handling middleware
-app.use((err, _req, res, _next) => {
-    console.error('[Express] Unhandled route error:', err);
+// Express error-handling middleware. Client errors (a stale CSRF token after
+// a restart, malformed JSON) are routine: one line, no stack trace.
+app.use((err, req, res, _next) => {
+    const status = err.status || err.statusCode || 500;
+    if (status < 500) {
+        console.warn(`[Express] ${status} ${req.method} ${req.originalUrl}: ${err.message}`);
+    } else {
+        console.error('[Express] Unhandled route error:', err);
+    }
     if (!res.headersSent) {
-        res.status(err.status || 500).json({
-            error: err.expose ? err.message : 'Internal server error'
+        res.status(status).json({
+            error: err.expose ? err.message : 'Internal server error',
+            ...(err.expose && err.code ? { code: err.code } : {})
         });
     }
 });

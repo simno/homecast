@@ -40,6 +40,7 @@ sources from webpages and serves them to your devices in a compatible format.
 - 🔍 **Auto-Discovery** — Finds Chromecast and Apple TV devices automatically via mDNS
 - 🎯 **Smart Extraction** — Finds the stream behind a webpage: player markup, embedded JSON, iframe chains, player scripts, and a headless-browser fallback that watches the page's network traffic
 - 📺 **Twitch** — Live channels and VODs resolved to castable HLS
+- 💬 **Subtitles** — Picks up subtitles from the page and from HLS/DASH manifests, or casts a WebVTT/SRT file by URL; switch or turn them off while playing
 - 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast; Apple TV takes HLS and MP4)
 -  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
@@ -178,7 +179,34 @@ All modes are supported by HomeCast.
 
 - Direct videos: MP4, WebM
 - Streaming: HLS (m3u8), DASH
-- Simple webpage embeds with direct video links
+- Webpages whose player uses one of the above, including players inside iframes and players that only load in a browser
+  (see [How stream detection works](#how-stream-detection-works))
+
+Sites with handling of their own in the code:
+
+- **Twitch** — live channels and VODs, resolved through Twitch's API
+- **X / Periscope broadcasts** — live and replays: replays are told apart from live streams, and the CDN's rejection of
+  a Referer is remembered per host
+
+This is what the code handles specifically, not a list of tested sites. If a site works (or doesn't), an issue saying
+so is welcome.
+
+### Subtitles
+
+After Analyze, a **Subtitles** picker lists what was found with the video:
+
+- **On the page** — `<track>` subtitles and captions next to the `<video>`
+- **In the stream** — subtitle renditions in an HLS master playlist or a DASH manifest
+- **From a URL** — any WebVTT or SRT file you point it at, e.g. for a plain MP4 on a file server
+
+| Device     | What works                                                                                                      |
+|------------|-----------------------------------------------------------------------------------------------------------------|
+| Chromecast | All three. Switch tracks or turn them off from the dashboard while playing                                      |
+| Apple TV   | Subtitles inside HLS streams, turned on with the TV remote. AirPlay can't show a separate subtitle file |
+
+Subtitle files are always fetched through HomeCast (even with Proxy Stream off), because receivers only accept them
+with CORS headers. SRT is converted to WebVTT on the way, and the last language you picked becomes the default for
+the next video.
 
 ### How stream detection works
 
@@ -226,6 +254,21 @@ For these services, use their official apps or browser extensions.
 | `DISABLE_SSRF_PROTECTION`    | `false`        | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
 | `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected  | Path to Playwright browser binaries                                                          |
 | `AIRPLAY_PAIRING_STORE`      | `./data/airplay-pairings.json` | Path to AirPlay pairing data file                                           |
+
+#### Advanced tuning
+
+Defaults suit most networks; change these only to work around a specific problem.
+
+| Variable                     | Default | Description                                                                          |
+|------------------------------|---------|--------------------------------------------------------------------------------------|
+| `STALL_TIMEOUT_SECONDS`      | `15`    | Seconds a Chromecast can buffer without fetching any media before it's restarted     |
+| `MAX_RECOVERY_ATTEMPTS`      | `3`     | Stall restarts to try before giving up                                               |
+| `HEARTBEAT_INTERVAL_SECONDS` | `5`     | How often each device connection is checked                                          |
+| `MAX_MISSED_HEARTBEATS`      | `3`     | Missed checks before a connection is marked unhealthy                                |
+| `RECONNECT_DELAY_SECONDS`    | `10`    | Wait before reconnecting to a device that dropped                                    |
+| `MAX_RECONNECT_ATTEMPTS`     | `3`     | Reconnection attempts before giving up                                               |
+| `CACHE_TTL_VOD_SECONDS`      | `60`    | How long an on-demand HLS playlist is cached                                         |
+| `CACHE_TTL_LIVE_SECONDS`     | `4`     | How long a live HLS playlist is cached (keep below the segment duration)             |
 
 ### Security
 

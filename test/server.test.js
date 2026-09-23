@@ -63,23 +63,47 @@ test('the device list is readable without a CSRF token', async () => {
 
 // --- CSRF ---
 
-for (const path of ['/api/cast', '/api/stop', '/api/extract', '/api/airplay/pair/192.168.1.50', '/api/airplay/unpair/192.168.1.50']) {
+// Includes a route that doesn't exist: protection is the default for /api,
+// not a list someone has to remember to extend.
+for (const path of ['/api/cast', '/api/stop', '/api/extract', '/api/subtitles', '/api/airplay/pair/192.168.1.50',
+    '/api/airplay/unpair/192.168.1.50', '/api/some-future-route']) {
     test(`POST ${path} without a CSRF token is refused`, async () => {
         const res = await postJson(path, {});
         assert.strictEqual(res.status, 403);
     });
 }
 
-test('a token without its cookie is refused', async () => {
+test('a token without its cookie is refused, with a code the UI can recover from', async () => {
     const { token } = await csrf();
     const res = await postJson('/api/cast', {}, { token });
     assert.strictEqual(res.status, 403);
+    assert.strictEqual((await res.json()).code, 'EBADCSRFTOKEN');
+});
+
+test('reads need no token', async () => {
+    const res = await fetch(`${base}/api/session/192.168.1.50`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(await res.json(), { active: false });
 });
 
 test('a valid token reaches the cast route, which then validates the body', async () => {
     const res = await postJson('/api/cast', { ip: 'not-an-ip', url: 'https://cdn.example/v.mp4' }, await csrf());
     assert.strictEqual(res.status, 400);
     assert.match((await res.json()).error, /IP address/);
+});
+
+test('a malformed subtitle choice is refused', async () => {
+    const auth = await csrf();
+    for (const subtitle of ['en', { url: 'file:///etc/passwd' }, {}]) {
+        const res = await postJson('/api/cast', { ip: '192.168.1.50', url: 'https://cdn.example/v.mp4', subtitle }, auth);
+        assert.strictEqual(res.status, 400, JSON.stringify(subtitle));
+        assert.match((await res.json()).error, /subtitle/i);
+    }
+});
+
+test('switching subtitles needs an active session', async () => {
+    const res = await postJson('/api/subtitles', { ip: '192.168.1.50', trackId: null }, await csrf());
+    assert.strictEqual(res.status, 404);
 });
 
 test('a valid token reaches the stop route', async () => {
