@@ -1,198 +1,69 @@
-// Performance Tests - Tests performance-critical operations
-
+// Time budgets for the hot paths on large inputs: playlist rewriting and
+// quality capping (every live refresh), page and script scanning (a
+// catastrophic regex backtrack would hang Analyze), and subtitle conversion.
+// Budgets are generous so a slow CI runner doesn't fail them; they exist to
+// catch an accidental O(n²) or a backtracking regex, which blow past them by
+// orders of magnitude.
 const { test } = require('node:test');
 const assert = require('assert');
+const { rewritePlaylist, filterMasterPlaylist } = require('../lib/proxy');
+const scan = require('../lib/media-scan');
+const { toWebVtt, parseHlsSubtitles } = require('../lib/subtitles');
 
-// Test URL resolution performance
-const performanceTests = [
-    {
-        name: 'Resolve 1000 URLs quickly',
-        operation: () => {
-            const { resolveM3u8Url } = require('../lib/proxy');
-            const baseUrl = new URL('https://cdn.example.com/videos/stream.m3u8');
-
-            const start = Date.now();
-            for (let i = 0; i < 1000; i++) {
-                resolveM3u8Url(`segment${i}.ts`, baseUrl);
-            }
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 100 }; // Should complete in < 100ms
-        }
-    },
-    {
-        name: 'Parse large playlist quickly',
-        operation: () => {
-            // Generate a large playlist (1000 segments)
-            const segments = Array(1000).fill(0).map((_, i) => `#EXTINF:4.0,\nsegment${i}.ts`).join('\n');
-            const playlist = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n${segments}`;
-
-            const start = Date.now();
-            const lines = playlist.split('\n');
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 50, count: lines.length }; // Should parse < 50ms
-        }
-    },
-    {
-        name: 'URL encoding 1000 times is fast',
-        operation: () => {
-            const testUrl = 'https://cdn.example.com/video.ts?token=abc123&expires=9999999999&signature=xyz';
-
-            const start = Date.now();
-            for (let i = 0; i < 1000; i++) {
-                encodeURIComponent(testUrl);
-            }
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 50 }; // Should complete in < 50ms
-        }
-    },
-    {
-        name: 'Cache lookup is O(1)',
-        operation: () => {
-            const cache = new Map();
-
-            // Populate cache with 1000 entries
-            for (let i = 0; i < 1000; i++) {
-                cache.set(`https://example.com/video${i}.m3u8`, {
-                    content: 'test',
-                    timestamp: Date.now(),
-                    isLive: false
-                });
-            }
-
-            // Measure lookup time
-            const start = Date.now();
-            for (let i = 0; i < 1000; i++) {
-                cache.get(`https://example.com/video${i}.m3u8`);
-            }
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 10 }; // Should be very fast < 10ms
-        }
-    },
-    {
-        name: 'String operations on large playlist',
-        operation: () => {
-            const largePlaylist = '#EXTM3U\n' + Array(5000).fill('#EXTINF:4.0,\nsegment.ts').join('\n');
-
-            const start = Date.now();
-
-            // Test common operations
-            const _hasEndlist = largePlaylist.includes('#EXT-X-ENDLIST');
-            const lines = largePlaylist.split('\n');
-            const _filtered = lines.filter(l => !l.startsWith('#'));
-
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 200, operations: 3 }; // < 200ms for large playlist
-        }
-    }
-];
-
-for (const { name, operation } of performanceTests) {
-    test(name, () => {
-        const result = operation();
-        assert.ok(result.elapsed <= result.maxTime, `Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
-    });
+function timed(fn) {
+    const start = process.hrtime.bigint();
+    const result = fn();
+    return { result, ms: Number(process.hrtime.bigint() - start) / 1e6 };
 }
 
-// Test memory efficiency
-const memoryTests = [
-    {
-        name: 'Cache cleanup prevents memory leak',
-        operation: () => {
-            const cache = new Map();
+const BASE = new URL('https://cdn.example/live/index.m3u8');
 
-            // Add 10000 entries
-            for (let i = 0; i < 10000; i++) {
-                cache.set(`url${i}`, { content: 'x'.repeat(1000), timestamp: Date.now() - 70000, isLive: false });
-            }
+test('a 10,000-segment playlist is rewritten in under 250ms', () => {
+    const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n' +
+        Array.from({ length: 10000 }, (_, i) => `#EXTINF:4.0,\nseg${i}.ts?token=abc`).join('\n');
+    const { result, ms } = timed(() => rewritePlaylist(playlist, BASE, (u) => `http://h/proxy?url=${encodeURIComponent(u)}`));
+    assert.strictEqual((result.match(/\/proxy\?url=/g) || []).length, 10000);
+    assert.ok(ms < 250, `took ${ms.toFixed(1)}ms`);
+});
 
-            const sizeBefore = cache.size;
+test('a 500-variant master is capped in under 100ms', () => {
+    const master = '#EXTM3U\n' + Array.from({ length: 500 }, (_, i) =>
+        `#EXT-X-STREAM-INF:BANDWIDTH=${(i + 1) * 1000},RESOLUTION=${i + 100}x${i + 100}\nv${i}.m3u8`).join('\n');
+    const { result, ms } = timed(() => filterMasterPlaylist(master, 'highest'));
+    assert.strictEqual((result.match(/#EXT-X-STREAM-INF/g) || []).length, 1);
+    assert.ok(ms < 100, `took ${ms.toFixed(1)}ms`);
+});
 
-            // Simulate cleanup (server.js lines 85-98)
-            const CACHE_TTL_VOD = 60000;
-            const CACHE_TTL_LIVE = 4000;
-            const now = Date.now();
-            let cleaned = 0;
+test('a 2MB page of noise is scanned in under 1s and its stream still found', () => {
+    // Long runs of quotes, slashes and dots are what backtracking URL regexes choke on.
+    const noise = 'x"/.:'.repeat(200000);
+    const html = `<html><body><script>${noise} var src = "https://cdn.example/live/master.m3u8"; ${noise}</script></body></html>`;
+    const { result, ms } = timed(() => scan.scanDocument(html, 'https://site.example/watch'));
+    assert.ok(result.candidates.some(c => c.url === 'https://cdn.example/live/master.m3u8'));
+    assert.ok(ms < 1000, `took ${ms.toFixed(1)}ms`);
+});
 
-            for (const [key, value] of cache.entries()) {
-                const ttl = value.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
-                if (now - value.timestamp > ttl) {
-                    cache.delete(key);
-                    cleaned++;
-                }
-            }
+test('a 1.5MB player script is searched in under 1s', () => {
+    const script = 'function f(){return "a/b.c"}'.repeat(50000) + ';cfg={file:"https://cdn.example/v/clip.mp4"}';
+    const { result, ms } = timed(() => scan.scanText(script, 'https://site.example/'));
+    assert.ok(result.some(c => c.url === 'https://cdn.example/v/clip.mp4'));
+    assert.ok(ms < 1000, `took ${ms.toFixed(1)}ms`);
+});
 
-            return {
-                sizeBefore,
-                sizeAfter: cache.size,
-                cleaned,
-                expectedCleaned: 10000 // All should be cleaned
-            };
-        }
-    },
-    {
-        name: 'Large playlist does not cause excessive memory',
-        operation: () => {
-            // Create a very large playlist
-            const segments = Array(10000).fill(0).map((_, i) => `#EXTINF:4.0,\nhttps://cdn.example.com/seg${i}.ts`).join('\n');
-            const playlist = `#EXTM3U\n${segments}`;
+test('a 20,000-cue SRT file is converted in under 250ms', () => {
+    const srt = Array.from({ length: 20000 }, (_, i) => {
+        const s = String(i % 60).padStart(2, '0');
+        return `${i + 1}\r\n00:00:${s},000 --> 00:00:${s},500\r\nLine ${i}\r\n`;
+    }).join('\r\n');
+    const { result, ms } = timed(() => toWebVtt(Buffer.from(srt)));
+    assert.ok(result.startsWith('WEBVTT'));
+    assert.ok(ms < 250, `took ${ms.toFixed(1)}ms`);
+});
 
-            const _lines = playlist.split('\n');
-
-            // Rough estimate: each line ~50 chars, 20000 lines = ~1MB
-            const estimatedSize = playlist.length;
-            const maxSize = 5 * 1024 * 1024; // 5MB
-
-            return { estimatedSize, maxSize, withinLimit: estimatedSize < maxSize };
-        }
-    }
-];
-
-for (const { name, operation } of memoryTests) {
-    test(name, () => {
-        const result = operation();
-        if (result.expectedCleaned !== undefined) assert.strictEqual(result.cleaned, result.expectedCleaned);
-        if (result.withinLimit !== undefined) {
-            assert.ok(result.withinLimit, `Size ${result.estimatedSize} exceeds max ${result.maxSize}`);
-        }
-    });
-}
-
-// Test regex performance
-const regexTests = [
-    {
-        name: 'M3U8 regex match is fast on large HTML',
-        operation: () => {
-            const largeHtml = '<html><body>' + 'x'.repeat(100000) + 'var url = "https://cdn.example.com/stream.m3u8";' + 'x'.repeat(100000) + '</body></html>';
-
-            const start = Date.now();
-            const match = largeHtml.match(/https?:\/\/[^"'\s]+\.m3u8(\?[^"'\s]*)?/);
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 50, found: match !== null };
-        }
-    },
-    {
-        name: 'MP4 regex match handles multiple URLs',
-        operation: () => {
-            const html = Array(100).fill('https://cdn.example.com/video.mp4 ').join('');
-
-            const start = Date.now();
-            const matches = html.match(/https?:\/\/[^"'\s]+\.mp4(\?[^"'\s]*)?/g);
-            const elapsed = Date.now() - start;
-
-            return { elapsed, maxTime: 20, count: matches ? matches.length : 0 };
-        }
-    }
-];
-
-for (const { name, operation } of regexTests) {
-    test(name, () => {
-        const result = operation();
-        assert.ok(result.elapsed <= result.maxTime, `Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
-    });
-}
+test('a master with 1,000 subtitle renditions is parsed in under 100ms', () => {
+    const master = '#EXTM3U\n' + Array.from({ length: 1000 }, (_, i) =>
+        `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="Track ${i}",LANGUAGE="l${i}",URI="s${i}.m3u8"`).join('\n');
+    const { result, ms } = timed(() => parseHlsSubtitles(master));
+    assert.strictEqual(result.length, 1000);
+    assert.ok(ms < 100, `took ${ms.toFixed(1)}ms`);
+});

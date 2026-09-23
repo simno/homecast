@@ -1,144 +1,94 @@
-// Cache Logic Tests - Tests adaptive caching system for live vs VOD streams
+// The proxy's playlist cache (routes/proxy.js): VOD playlists are reused,
+// live ones only briefly, each quality separately, concurrent requests share
+// one upstream fetch, and failures are never cached. The live TTL is cut to
+// 1s so expiry can be seen without a long wait.
+process.env.CACHE_TTL_LIVE_SECONDS = '1';
+process.env.DISABLE_SSRF_PROTECTION = 'true'; // fixtures live on 127.0.0.1
 
-const { test } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('assert');
+const http = require('http');
+const express = require('express');
 
-// Test cases for stream type detection
-const streamDetectionTests = [
-    {
-        name: 'Detect VOD stream with EXT-X-ENDLIST',
-        playlist: `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:10
-#EXTINF:10.0,
-segment1.ts
-#EXTINF:10.0,
-segment2.ts
-#EXT-X-ENDLIST`,
-        expectedType: 'VOD',
-        expectedTTL: 60000
-    },
-    {
-        name: 'Detect live stream without EXT-X-ENDLIST',
-        playlist: `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:4
-#EXTINF:4.0,
-segment1001.ts
-#EXTINF:4.0,
-segment1002.ts`,
-        expectedType: 'LIVE',
-        expectedTTL: 4000
-    },
-    {
-        name: 'Case-sensitive check: lowercase endlist not detected (LIVE)',
-        playlist: `#EXTM3U
-#ext-x-endlist`,
-        expectedType: 'LIVE', // .includes() is case-sensitive
-        expectedTTL: 4000
-    },
-    {
-        name: 'Detect live stream with sequence number',
-        playlist: `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-MEDIA-SEQUENCE:52301
-#EXT-X-TARGETDURATION:4
-#EXTINF:4.0,
-segment52301.ts`,
-        expectedType: 'LIVE',
-        expectedTTL: 4000
-    },
-    {
-        name: 'Empty playlist should be treated as VOD',
-        playlist: '#EXTM3U',
-        expectedType: 'LIVE', // No endlist = live
-        expectedTTL: 4000
+const MASTER = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nhi.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360\nlo.m3u8\n';
+const VOD = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n#EXT-X-ENDLIST\n';
+const LIVE = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n';
+
+const hits = new Map(); // upstream path -> request count
+let failNext = new Set(); // paths that answer 404 once
+let cdn;
+let base;
+let api;
+
+const upstream = http.createServer((req, res) => {
+    const path = req.url.split('?')[0];
+    hits.set(path, (hits.get(path) || 0) + 1);
+    if (failNext.delete(path)) {
+        res.writeHead(404);
+        return res.end();
     }
-];
+    const body = path.includes('master') ? MASTER : path.includes('live') ? LIVE : VOD;
+    // A little latency, so concurrent requests really overlap.
+    setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end(body);
+    }, path.includes('slow') ? 100 : 0);
+});
 
-for (const { name, playlist, expectedType, expectedTTL } of streamDetectionTests) {
-    test(name, () => {
-        // Simulate the detection logic from server.js line 332
-        const isLive = !playlist.includes('#EXT-X-ENDLIST');
-        assert.strictEqual(isLive ? 'LIVE' : 'VOD', expectedType);
-        assert.strictEqual(isLive ? 4000 : 60000, expectedTTL);
-    });
-}
+before(async () => {
+    await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    cdn = `http://127.0.0.1:${upstream.address().port}`;
+    const app = express();
+    app.use(require('../routes/proxy'));
+    api = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => api.once('listening', resolve));
+    base = `http://127.0.0.1:${api.address().port}`;
+});
 
-// Test cache expiration logic
-const cacheExpirationTests = [
-    {
-        name: 'VOD cache should be valid within 60s',
-        isLive: false,
-        timestamp: Date.now() - 30000, // 30 seconds ago
-        expectedValid: true
-    },
-    {
-        name: 'VOD cache should expire after 60s',
-        isLive: false,
-        timestamp: Date.now() - 61000, // 61 seconds ago
-        expectedValid: false
-    },
-    {
-        name: 'Live cache should be valid within 4s',
-        isLive: true,
-        timestamp: Date.now() - 2000, // 2 seconds ago
-        expectedValid: true
-    },
-    {
-        name: 'Live cache should expire after 4s',
-        isLive: true,
-        timestamp: Date.now() - 5000, // 5 seconds ago
-        expectedValid: false
-    },
-    {
-        name: 'Live cache at exactly 4s should expire',
-        isLive: true,
-        timestamp: Date.now() - 4000, // Exactly 4 seconds ago
-        expectedValid: false
-    },
-    {
-        name: 'VOD cache at exactly 60s should expire',
-        isLive: false,
-        timestamp: Date.now() - 60000, // Exactly 60 seconds ago
-        expectedValid: false
+after(() => {
+    for (const s of [api, upstream]) {
+        s.closeAllConnections();
+        s.close();
     }
-];
+});
 
-for (const { name, isLive, timestamp, expectedValid } of cacheExpirationTests) {
-    test(name, () => {
-        // Simulate cache validation logic from server.js line 291-294
-        const CACHE_TTL_VOD = 60000;
-        const CACHE_TTL_LIVE = 4000;
-        const cacheTTL = isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
-        const age = Date.now() - timestamp;
-        assert.strictEqual(age < cacheTTL, expectedValid, `Age: ${age}ms, TTL: ${cacheTTL}ms`);
-    });
-}
+const get = (path, quality = 'highest') =>
+    fetch(`${base}/proxy?${new URLSearchParams({ url: `${cdn}${path}`, quality, type: 'hls' })}`);
 
-// Test cache key generation
-const cacheKeyTests = [
-    {
-        name: 'Cache key should match URL exactly',
-        url: 'https://example.com/playlist.m3u8',
-        expectedKey: 'https://example.com/playlist.m3u8'
-    },
-    {
-        name: 'Cache key should preserve query parameters',
-        url: 'https://example.com/playlist.m3u8?token=abc123&expires=1234567890',
-        expectedKey: 'https://example.com/playlist.m3u8?token=abc123&expires=1234567890'
-    },
-    {
-        name: 'Cache key should be case-sensitive',
-        url: 'https://Example.COM/Playlist.M3U8',
-        expectedKey: 'https://Example.COM/Playlist.M3U8'
-    }
-];
+test('a VOD playlist is fetched once and then served from the cache', async () => {
+    const first = await (await get('/vod-a.m3u8')).text();
+    const second = await (await get('/vod-a.m3u8')).text();
+    assert.strictEqual(hits.get('/vod-a.m3u8'), 1);
+    assert.strictEqual(second, first);
+});
 
-for (const { name, url, expectedKey } of cacheKeyTests) {
-    test(name, () => {
-        // Simulate cache key generation from server.js line 287
-        const cacheKey = url;
-        assert.strictEqual(cacheKey, expectedKey);
-    });
-}
+test('a live playlist is reused within its TTL and refetched after it', async () => {
+    await get('/live-a.m3u8');
+    await get('/live-a.m3u8');
+    assert.strictEqual(hits.get('/live-a.m3u8'), 1);
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await get('/live-a.m3u8');
+    assert.strictEqual(hits.get('/live-a.m3u8'), 2);
+});
+
+test('each quality of a master is cached separately', async () => {
+    const highest = await (await get('/master-a.m3u8', 'highest')).text();
+    const auto = await (await get('/master-a.m3u8', 'auto')).text();
+    assert.strictEqual(hits.get('/master-a.m3u8'), 2);
+    assert.strictEqual((highest.match(/#EXT-X-STREAM-INF/g) || []).length, 1);
+    assert.strictEqual((auto.match(/#EXT-X-STREAM-INF/g) || []).length, 2);
+});
+
+test('concurrent requests for the same playlist share one upstream fetch', async () => {
+    const bodies = await Promise.all(Array.from({ length: 5 }, () => get('/slow-vod.m3u8').then(r => r.text())));
+    assert.strictEqual(hits.get('/slow-vod.m3u8'), 1);
+    assert.ok(bodies.every(b => b === bodies[0]));
+});
+
+test('an upstream error is passed on and not cached', async () => {
+    failNext = new Set(['/vod-flaky.m3u8']);
+    assert.strictEqual((await get('/vod-flaky.m3u8')).status, 404);
+    assert.strictEqual((await get('/vod-flaky.m3u8')).status, 200);
+    assert.strictEqual(hits.get('/vod-flaky.m3u8'), 2);
+});
