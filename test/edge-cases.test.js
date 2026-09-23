@@ -1,9 +1,7 @@
 // Edge Cases Tests - Tests error handling and boundary conditions
 
-console.log('Running Edge Cases Tests...\n');
-
-let passed = 0;
-let failed = 0;
+const { test } = require('node:test');
+const assert = require('assert');
 
 // Test URL parsing edge cases
 const urlParsingTests = [
@@ -49,29 +47,12 @@ const urlParsingTests = [
     }
 ];
 
-urlParsingTests.forEach(({ name, input, shouldThrow }, index) => {
-    try {
-        new URL(input);
-
-        if (shouldThrow) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log('   Expected URL parsing to throw, but succeeded');
-            failed++;
-        } else {
-            console.log(`✓ Test ${index + 1}: ${name}`);
-            passed++;
-        }
-    } catch (err) {
-        if (!shouldThrow) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log(`   Unexpected error: ${err.message}`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${index + 1}: ${name}`);
-            passed++;
-        }
-    }
-});
+for (const { name, input, shouldThrow } of urlParsingTests) {
+    test(name, () => {
+        if (shouldThrow) assert.throws(() => new URL(input));
+        else assert.doesNotThrow(() => new URL(input));
+    });
+}
 
 // Test playlist boundary conditions
 const playlistBoundaryTests = [
@@ -114,29 +95,12 @@ const playlistBoundaryTests = [
     }
 ];
 
-playlistBoundaryTests.forEach(({ name, playlist, expectedValid, minSize }, index) => {
-    try {
-        // Basic validation
-        if (expectedValid) {
-            // Check it's a string
-            if (typeof playlist !== 'string') {
-                throw new Error('Playlist must be a string');
-            }
-
-            // Check minimum size if specified
-            if (minSize && playlist.length < minSize) {
-                throw new Error(`Playlist too small: ${playlist.length} < ${minSize}`);
-            }
-
-            console.log(`✓ Test ${urlParsingTests.length + index + 1}: ${name}`);
-            passed++;
-        }
-    } catch (err) {
-        console.log(`❌ Test ${urlParsingTests.length + index + 1} FAILED: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+for (const { name, playlist, minSize } of playlistBoundaryTests) {
+    test(name, () => {
+        assert.strictEqual(typeof playlist, 'string');
+        if (minSize) assert.ok(playlist.length >= minSize, `Playlist too small: ${playlist.length} < ${minSize}`);
+    });
+}
 
 // Test cache edge cases
 const cacheEdgeCases = [
@@ -178,30 +142,16 @@ const cacheEdgeCases = [
     }
 ];
 
-cacheEdgeCases.forEach(({ name, getTimestamp, age: fixedAge, isLive, expectedValid }, index) => {
-    try {
+for (const { name, getTimestamp, age: fixedAge, isLive, expectedValid } of cacheEdgeCases) {
+    test(name, () => {
         const CACHE_TTL_VOD = 60000;
         const CACHE_TTL_LIVE = 4000;
         const cacheTTL = isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
         // Use fixed age if provided (avoids timing flakiness), otherwise compute from timestamp
         const age = fixedAge !== undefined ? fixedAge : Date.now() - getTimestamp();
-        const isValid = (age < cacheTTL);
-
-        if (isValid !== expectedValid) {
-            console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Expected valid: ${expectedValid}, Got: ${isValid}`);
-            console.log(`   Age: ${age}ms, TTL: ${cacheTTL}ms`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${urlParsingTests.length + playlistBoundaryTests.length + index + 1}: ${name}`);
-            passed++;
-        }
-    } catch (err) {
-        console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+        assert.strictEqual(age < cacheTTL, expectedValid, `Age: ${age}ms, TTL: ${cacheTTL}ms`);
+    });
+}
 
 // Test content type detection
 const contentTypeTests = [
@@ -237,8 +187,8 @@ const contentTypeTests = [
     }
 ];
 
-contentTypeTests.forEach(({ name, url, expected }, index) => {
-    try {
+for (const { name, url, expected } of contentTypeTests) {
+    test(name, () => {
         // Simulate content type detection from server.js lines 443-448
         let contentType = 'video/mp4';
         const lowerUrl = url.toLowerCase();
@@ -246,22 +196,9 @@ contentTypeTests.forEach(({ name, url, expected }, index) => {
             contentType = 'application/x-mpegURL';
         }
         if (lowerUrl.includes('.webm')) contentType = 'video/webm';
-
-        if (contentType !== expected) {
-            console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + index + 1} FAILED: ${name}`);
-            console.log(`   Expected: ${expected}`);
-            console.log(`   Got: ${contentType}`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + index + 1}: ${name}`);
-            passed++;
-        }
-    } catch (err) {
-        console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+        assert.strictEqual(contentType, expected);
+    });
+}
 
 // Test special characters in URLs
 const specialCharTests = [
@@ -292,32 +229,9 @@ const specialCharTests = [
     }
 ];
 
-specialCharTests.forEach(({ name, url, shouldParse }, index) => {
-    try {
-        new URL(url);
-
-        if (!shouldParse) {
-            console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + contentTypeTests.length + index + 1} FAILED: ${name}`);
-            console.log('   Expected parsing to fail');
-            failed++;
-        } else {
-            console.log(`✓ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + contentTypeTests.length + index + 1}: ${name}`);
-            passed++;
-        }
-    } catch (err) {
-        if (shouldParse) {
-            console.log(`❌ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + contentTypeTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Unexpected error: ${err.message}`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${urlParsingTests.length + playlistBoundaryTests.length + cacheEdgeCases.length + contentTypeTests.length + index + 1}: ${name}`);
-            passed++;
-        }
-    }
-});
-
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);
+for (const { name, url, shouldParse } of specialCharTests) {
+    test(name, () => {
+        if (shouldParse) assert.doesNotThrow(() => new URL(url));
+        else assert.throws(() => new URL(url));
+    });
+}

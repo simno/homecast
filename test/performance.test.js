@@ -1,9 +1,7 @@
 // Performance Tests - Tests performance-critical operations
 
-console.log('Running Performance Tests...\n');
-
-let passed = 0;
-let failed = 0;
+const { test } = require('node:test');
+const assert = require('assert');
 
 // Test URL resolution performance
 const performanceTests = [
@@ -93,24 +91,12 @@ const performanceTests = [
     }
 ];
 
-performanceTests.forEach(({ name, operation }, index) => {
-    try {
+for (const { name, operation } of performanceTests) {
+    test(name, () => {
         const result = operation();
-
-        if (result.elapsed > result.maxTime) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log(`   Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${index + 1}: ${name} (${result.elapsed}ms)`);
-            passed++;
-        }
-    } catch (err) {
-        console.log(`❌ Test ${index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+        assert.ok(result.elapsed <= result.maxTime, `Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
+    });
+}
 
 // Test memory efficiency
 const memoryTests = [
@@ -166,28 +152,15 @@ const memoryTests = [
     }
 ];
 
-memoryTests.forEach(({ name, operation }, index) => {
-    try {
+for (const { name, operation } of memoryTests) {
+    test(name, () => {
         const result = operation();
-
-        if (result.expectedCleaned !== undefined && result.cleaned !== result.expectedCleaned) {
-            console.log(`❌ Test ${performanceTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Expected ${result.expectedCleaned} cleaned, got ${result.cleaned}`);
-            failed++;
-        } else if (result.withinLimit !== undefined && !result.withinLimit) {
-            console.log(`❌ Test ${performanceTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Size ${result.estimatedSize} exceeds max ${result.maxSize}`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${performanceTests.length + index + 1}: ${name}`);
-            passed++;
+        if (result.expectedCleaned !== undefined) assert.strictEqual(result.cleaned, result.expectedCleaned);
+        if (result.withinLimit !== undefined) {
+            assert.ok(result.withinLimit, `Size ${result.estimatedSize} exceeds max ${result.maxSize}`);
         }
-    } catch (err) {
-        console.log(`❌ Test ${performanceTests.length + index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+    });
+}
 
 // Test regex performance
 const regexTests = [
@@ -217,27 +190,9 @@ const regexTests = [
     }
 ];
 
-regexTests.forEach(({ name, operation }, index) => {
-    try {
+for (const { name, operation } of regexTests) {
+    test(name, () => {
         const result = operation();
-
-        if (result.elapsed > result.maxTime) {
-            console.log(`❌ Test ${performanceTests.length + memoryTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
-            failed++;
-        } else {
-            console.log(`✓ Test ${performanceTests.length + memoryTests.length + index + 1}: ${name} (${result.elapsed}ms)`);
-            passed++;
-        }
-    } catch (err) {
-        console.log(`❌ Test ${performanceTests.length + memoryTests.length + index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
-
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);
+        assert.ok(result.elapsed <= result.maxTime, `Took ${result.elapsed}ms (max: ${result.maxTime}ms)`);
+    });
+}

@@ -2,20 +2,12 @@
 // discovery. Fixtures live on 127.0.0.1, so the SSRF guard is off for this run.
 process.env.DISABLE_SSRF_PROTECTION = 'true';
 
+const { test, before, after } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const express = require('express');
 const dash = require('../lib/dash');
 const { findStreams } = require('../lib/stream-finder');
-
-console.log('Running DASH Tests...\n');
-
-let passed = 0;
-let failed = 0;
-const tests = [];
-function test(description, fn) {
-    tests.push({ description, fn });
-}
 
 const MPD_URL = 'https://cdn.example/show/ep1/manifest.mpd?tok=abc';
 
@@ -280,31 +272,12 @@ test('Apple TV casts of DASH are refused with an explanation', async () => {
     }
 });
 
-async function run() {
+before(async () => {
     await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${upstream.address().port}`;
+});
 
-    for (const { description, fn } of tests) {
-        try {
-            await fn();
-            console.log(`✓ ${description}`);
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${description}`);
-            console.error(`  ${err.message}`);
-            failed++;
-        }
-    }
-
+after(() => {
     upstream.closeAllConnections();
     upstream.close();
-
-    console.log('\n' + '='.repeat(50));
-    console.log(`Results: ${passed} passed, ${failed} failed`);
-    console.log('='.repeat(50) + '\n');
-
-    // The proxy router keeps a cache-sweeping interval alive.
-    process.exit(failed > 0 ? 1 : 0);
-}
-
-run();
+});

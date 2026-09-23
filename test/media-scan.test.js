@@ -1,22 +1,6 @@
+const { test } = require('node:test');
 const assert = require('assert');
 const scan = require('../lib/media-scan');
-
-console.log('Running Media Scan Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-function test(description, fn) {
-    try {
-        fn();
-        console.log(`✓ ${description}`);
-        passed++;
-    } catch (err) {
-        console.error(`✗ ${description}`);
-        console.error(`  ${err.message}`);
-        failed++;
-    }
-}
 
 const PAGE = 'https://site.example/shows/episode.html';
 const urls = (list) => list.map(c => c.url).sort();
@@ -306,8 +290,3 @@ test('labels resolution by the short side', () => {
     assert.strictEqual(scan.resolutionLabel(3840, 2160), '4K');
 });
 
-console.log('\n' + '='.repeat(50));
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log('='.repeat(50) + '\n');
-
-if (failed > 0) process.exit(1);

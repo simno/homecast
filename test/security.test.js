@@ -1,19 +1,11 @@
 // SSRF guard tests. Run with protection ON (the default).
 delete process.env.DISABLE_SSRF_PROTECTION;
 
+const { test } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const axios = require('axios');
 const { isPrivateIP, validateProxyUrl, guardRedirect, safeRequestOptions } = require('../lib/security');
-
-console.log('Running Security Tests...\n');
-
-let passed = 0;
-let failed = 0;
-const tests = [];
-function test(description, fn) {
-    tests.push({ description, fn });
-}
 
 test('private and special IPv4 ranges are blocked', () => {
     for (const ip of ['0.0.0.0', '10.1.2.3', '100.64.0.1', '127.0.0.1', '169.254.169.254',
@@ -83,25 +75,3 @@ test('a redirect to an IP literal is refused end to end', async () => {
         server.close();
     }
 });
-
-async function run() {
-    for (const { description, fn } of tests) {
-        try {
-            await fn();
-            console.log(`✓ ${description}`);
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${description}`);
-            console.error(`  ${err.message}`);
-            failed++;
-        }
-    }
-
-    console.log('\n' + '='.repeat(50));
-    console.log(`Results: ${passed} passed, ${failed} failed`);
-    console.log('='.repeat(50) + '\n');
-
-    if (failed > 0) process.exit(1);
-}
-
-run();

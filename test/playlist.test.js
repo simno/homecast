@@ -1,9 +1,7 @@
 // Playlist Rewriting Tests - Tests M3U8 playlist rewriting logic
 
-console.log('Running Playlist Rewriting Tests...\n');
-
-let passed = 0;
-let failed = 0;
+const { test } = require('node:test');
+const assert = require('assert');
 
 // Simulate the playlist rewriting logic from server.js lines 334-344
 function rewritePlaylist(originalM3u8, baseUrl, proxyHost) {
@@ -122,53 +120,27 @@ segment.ts
     }
 ];
 
-playlistRewriteTests.forEach(({ name, playlist, baseUrl, proxyHost, expectedSegments, shouldContainProxy }, index) => {
-    try {
+for (const { name, playlist, baseUrl, proxyHost, expectedSegments, shouldContainProxy } of playlistRewriteTests) {
+    test(name, () => {
         const rewritten = rewritePlaylist(playlist, baseUrl, proxyHost);
 
         // Check that proxy URLs are present
         const proxyCount = (rewritten.match(/http:\/\/localhost:3000\/proxy\?url=/g) || []).length;
-
-        if (proxyCount !== expectedSegments) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log(`   Expected ${expectedSegments} proxy URLs, found ${proxyCount}`);
-            console.log(`   Rewritten:\n${rewritten}`);
-            failed++;
-            return;
-        }
+        assert.strictEqual(proxyCount, expectedSegments, `Rewritten:\n${rewritten}`);
 
         // Check that all original tags/comments are preserved
         const originalLines = playlist.split('\n').filter(l => l.trim().startsWith('#'));
         const rewrittenLines = rewritten.split('\n').filter(l => l.trim().startsWith('#'));
-
-        if (originalLines.length !== rewrittenLines.length) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log('   Tags/comments not preserved correctly');
-            console.log(`   Expected ${originalLines.length} comment lines, found ${rewrittenLines.length}`);
-            failed++;
-            return;
-        }
+        assert.strictEqual(rewrittenLines.length, originalLines.length, 'Tags/comments not preserved correctly');
 
         // Check that URLs are properly encoded
         if (shouldContainProxy && !rewritten.includes('url=https%3A%2F%2F')) {
             // At least one absolute URL should be encoded
             const hasEncodedUrl = rewritten.includes('url=https%3A') || rewritten.includes('url=http%3A');
-            if (!hasEncodedUrl && playlist.includes('http')) {
-                console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-                console.log('   URLs not properly URL-encoded');
-                failed++;
-                return;
-            }
+            assert.ok(hasEncodedUrl || !playlist.includes('http'), 'URLs not properly URL-encoded');
         }
-
-        console.log(`✓ Test ${index + 1}: ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`❌ Test ${index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
+    });
+}
 
 // Test URL encoding specifically
 const encodingTests = [
@@ -189,29 +161,8 @@ const encodingTests = [
     }
 ];
 
-encodingTests.forEach(({ name, url, expectedEncoded }, index) => {
-    try {
-        const encoded = encodeURIComponent(url);
-
-        if (encoded !== expectedEncoded) {
-            console.log(`❌ Test ${playlistRewriteTests.length + index + 1} FAILED: ${name}`);
-            console.log(`   Expected: ${expectedEncoded}`);
-            console.log(`   Got: ${encoded}`);
-            failed++;
-            return;
-        }
-
-        console.log(`✓ Test ${playlistRewriteTests.length + index + 1}: ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`❌ Test ${playlistRewriteTests.length + index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
-
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);
+for (const { name, url, expectedEncoded } of encodingTests) {
+    test(name, () => {
+        assert.strictEqual(encodeURIComponent(url), expectedEncoded);
+    });
+}

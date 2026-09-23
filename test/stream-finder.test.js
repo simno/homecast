@@ -2,20 +2,12 @@
 // The fixtures live on 127.0.0.1, so the SSRF guard has to be off for this run.
 process.env.DISABLE_SSRF_PROTECTION = 'true';
 
+const { test, before, after, beforeEach } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const express = require('express');
 const { findStreams, FinderError } = require('../lib/stream-finder');
 const extractRouter = require('../routes/extract');
-
-console.log('Running Stream Finder Tests...\n');
-
-let passed = 0;
-let failed = 0;
-const tests = [];
-function test(description, fn) {
-    tests.push({ description, fn });
-}
 
 // --- Fixtures ---
 
@@ -310,31 +302,14 @@ test('the API streams NDJSON progress, then the result', async () => {
     }
 });
 
-async function run() {
+before(async () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
+});
 
-    for (const { description, fn } of tests) {
-        extractRouter.clearExtractCache();
-        try {
-            await fn();
-            console.log(`✓ ${description}`);
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${description}`);
-            console.error(`  ${err.message}`);
-            failed++;
-        }
-    }
+beforeEach(() => extractRouter.clearExtractCache());
 
+after(() => {
     server.closeAllConnections();
     server.close();
-
-    console.log('\n' + '='.repeat(50));
-    console.log(`Results: ${passed} passed, ${failed} failed`);
-    console.log('='.repeat(50) + '\n');
-
-    process.exit(failed > 0 ? 1 : 0);
-}
-
-run();
+});

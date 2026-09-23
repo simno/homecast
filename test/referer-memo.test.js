@@ -1,26 +1,12 @@
 // Referer Memo Tests - Tests the per-host "this CDN rejects Referer" cache
 // that lets the proxy skip a doomed first request on hosts like pscp.tv.
 
+const { test, beforeEach } = require('node:test');
 const assert = require('assert');
 const { shouldSendReferer, noteRefererRejected, clearRefererMemo } = require('../lib/proxy');
 
-console.log('Running Referer Memo Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-function test(description, fn) {
-    try {
-        clearRefererMemo();
-        fn();
-        console.log(`✓ ${description}`);
-        passed++;
-    } catch (err) {
-        console.error(`✗ ${description}`);
-        console.error(`  ${err.message}`);
-        failed++;
-    }
-}
+// The memo is module state; every test starts from an empty one.
+beforeEach(clearRefererMemo);
 
 const PSCP = 'https://prod-fastly-us-east-1.video.pscp.tv/Transcoding/v1/hls/x/master.m3u8?type=replay';
 
@@ -78,8 +64,3 @@ test('clearing the memo restores the default', () => {
     assert.strictEqual(shouldSendReferer(PSCP), true);
 });
 
-console.log('\n' + '='.repeat(50));
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log('='.repeat(50) + '\n');
-
-if (failed > 0) process.exit(1);

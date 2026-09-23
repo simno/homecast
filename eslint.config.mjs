@@ -28,6 +28,7 @@ export default [
                 URL: 'readonly',
                 URLSearchParams: 'readonly',
                 AbortController: 'readonly',
+                fetch: 'readonly',
                 Error: 'readonly',
                 encodeURIComponent: 'readonly',
                 decodeURIComponent: 'readonly'

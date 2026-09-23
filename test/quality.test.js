@@ -1,21 +1,11 @@
 // Quality Filtering Tests - Tests master-playlist variant filtering
 
+const { test } = require('node:test');
+const assert = require('assert');
 const { filterMasterPlaylist } = require('../lib/proxy');
 
-console.log('Running Quality Filtering Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
 function check(name, condition, detail) {
-    if (condition) {
-        console.log(`✓ ${name}`);
-        passed++;
-    } else {
-        console.log(`❌ ${name}`);
-        if (detail) console.log(`   ${detail}`);
-        failed++;
-    }
+    test(name, () => assert.ok(condition, detail));
 }
 
 // A Twitch-style master playlist with VIDEO media groups + variants.
@@ -137,9 +127,3 @@ b.m3u8`;
     check('1080p H.264 is still eligible for highest',
         filterMasterPlaylist(twitchMaster, 'highest').includes('chunked/index.m3u8'));
 }
-
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);

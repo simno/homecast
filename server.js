@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const { doubleCsrf } = require('csrf-csrf');
@@ -77,7 +78,7 @@ app.use('/proxy', (_req, res, next) => {
 // Middleware
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // CSRF protection (optional, can be disabled via DISABLE_CSRF=true)
 const CSRF_ENABLED = process.env.DISABLE_CSRF !== 'true';
@@ -140,18 +141,18 @@ process.on('uncaughtException', (err) => {
     process.exit(1);
 });
 
-// Initialize subsystems
-initDiscovery();
-initAirPlayDiscovery();
-startHealthMonitoring();
-startAirPlayHealthMonitoring();
-startStallDetection();
-require('./lib/airplay-pairing-store').initPairingStore().catch(err => {
-    console.error('[AirPlay-Pairing] Failed to init pairing store:', err);
-});
-
-// Only start server if not being required as a module
+// Only start the server and its background subsystems when run directly;
+// tests require this module to exercise the fully wired app.
 if (require.main === module) {
+    initDiscovery();
+    initAirPlayDiscovery();
+    startHealthMonitoring();
+    startAirPlayHealthMonitoring();
+    startStallDetection();
+    require('./lib/airplay-pairing-store').initPairingStore().catch(err => {
+        console.error('[AirPlay-Pairing] Failed to init pairing store:', err);
+    });
+
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`HomeCast running on port ${PORT}`);
         console.log(`[Server] Stale device timeout: ${STALE_DEVICE_TIMEOUT_MS / 1000 / 60 / 60} hours`);
@@ -199,3 +200,5 @@ if (require.main === module) {
         process.exit(1);
     });
 }
+
+module.exports = { app, server };

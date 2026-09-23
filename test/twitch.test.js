@@ -1,24 +1,8 @@
 // Twitch Resolver Tests - URL parsing and usher playlist construction (no network)
 
+const { test } = require('node:test');
 const assert = require('assert');
 const { isTwitchUrl, parseTwitchUrl } = require('../lib/twitch');
-
-console.log('Running Twitch Resolver Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-    try {
-        fn();
-        console.log(`✓ ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`❌ ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-}
 
 // --- isTwitchUrl ---
 test('recognises twitch.tv hosts', () => {
@@ -60,8 +44,3 @@ test('does not treat reserved feature paths as channels', () => {
     assert.strictEqual(parseTwitchUrl('https://www.twitch.tv/settings'), null);
 });
 
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);

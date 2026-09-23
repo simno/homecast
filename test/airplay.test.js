@@ -1,22 +1,7 @@
 // AirPlay & WOL unit tests
+const { test } = require('node:test');
 const { extractMAC, sendWOL } = require('../lib/wol');
 const { extractVideoFromHtml } = require('../lib/extraction');
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-    try {
-        fn();
-        passed++;
-        console.log(`✓ ${name}`);
-    } catch (e) {
-        failed++;
-        console.error(`✗ ${name}: ${e.message}`);
-    }
-}
-
-console.log('Running AirPlay, WOL, and Extraction tests...\n');
 
 // ===== MAC Extraction =====
 test('Extract MAC from 12-char hex device ID', () => {
@@ -127,7 +112,3 @@ test('extractVideoFromHtml: return null for HTML without video', () => {
     if (result !== null) throw new Error(`Expected null, got ${result}`);
 });
 
-// ===== Results =====
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);

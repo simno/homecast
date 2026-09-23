@@ -49,7 +49,6 @@ sources from webpages and serves them to your devices in a compatible format.
 - ⚡ **Optimized Performance** — Connection pooling, DNS caching, large buffers
 - 🐳 **Docker Ready** — One command to run
 - 🔒 **Private** — Everything stays on your network
-- 💨 **Lightweight** — ~70MB Docker image
 
 ## Screenshots
 
@@ -60,6 +59,17 @@ sources from webpages and serves them to your devices in a compatible format.
 
 ## Installation
 
+### Choosing an image
+
+| Tag      | Download | Includes                                                                                   |
+|----------|----------|--------------------------------------------------------------------------------------------|
+| `latest` | ~330MB   | Everything, including the headless browser that finds streams on JavaScript-only players   |
+| `lite`   | ~90MB    | Everything except the headless browser                                                     |
+
+Direct stream links, HLS/DASH, Twitch and ordinary embedded players work the same in both. Pick `latest` unless size
+matters: some sites only reveal their stream once the page's JavaScript runs, and `lite` can't find those (Analyze
+tells you when this may be the case). Versioned tags follow the same pattern: `1.2.3` and `1.2.3-lite`.
+
 ### Docker (GitHub Container Registry)
 
 ```bash
@@ -68,11 +78,15 @@ docker run -d \
   --name homecast \
   --network host \
   --restart unless-stopped \
+  -v homecast-data:/app/data \
   -e PORT=3000 \
   ghcr.io/simno/homecast:latest
 
 # Access at http://localhost:3000
 ```
+
+The `homecast-data` volume keeps AirPlay pairings when the container is re-created (e.g. on upgrade). Without it,
+Apple TVs that need a PIN have to be paired again each time.
 
 ### Docker Compose (Recommended)
 
@@ -85,12 +99,21 @@ services:
     container_name: homecast
     network_mode: host  # Required for mDNS device discovery
     restart: unless-stopped
+    volumes:
+      - homecast-data:/app/data  # Keeps AirPlay pairings across upgrades
     environment:
       - NODE_ENV=production
       - PORT=3000
       # Optional: Set your machine's LAN IP if auto-detection fails
       # - HOST_IP=192.168.1.100
+
+volumes:
+  homecast-data:
 ```
+
+> [!NOTE]
+> To use a host directory instead of a named volume (e.g. `./data:/app/data`), create it first and make it writable
+> by the container user: `mkdir data && sudo chown 1001:1001 data`.
 
 Then start:
 
@@ -109,8 +132,9 @@ cd homecast
 docker compose up -d
 
 # OR build and run manually
-docker build -t homecast:local .
-docker run -d --name homecast --network host homecast:local
+docker build -t homecast:local .                                # full
+# docker build --build-arg VARIANT=lite -t homecast:local .    # lite
+docker run -d --name homecast --network host -v homecast-data:/app/data homecast:local
 ```
 
 ### Node.js
@@ -164,7 +188,7 @@ Analyze escalates from cheap to expensive and stops as soon as it finds somethin
 2. **The page** — `<video>`/`<source>`, Open Graph and schema.org metadata, and URLs hidden in inline scripts (JSON-escaped, URL-encoded or base64)
 3. **Embedded players** — iframes are followed a few levels deep; the frame that holds the player becomes the Referer
 4. **Player scripts** — the page's own external scripts are searched
-5. **A headless browser** — the page is run, the player is nudged to start, and its network requests are captured (also used when a site blocks plain HTTP requests)
+5. **A headless browser** — the page is run, the player is nudged to start, and its network requests are captured (also used when a site blocks plain HTTP requests). Not available in the `lite` image
 
 Every candidate is then checked: dead links are dropped, HLS masters report their qualities, MP4s their resolution and size, and the most likely main video is listed first (ads, previews and segments are ranked down).
 
@@ -268,7 +292,8 @@ Ensure these ports are open:
 
 - **Wrong PIN:** Check the Apple TV screen — a new code appears each time. Enter exactly the 4-8 digit number shown.
 - **Pairing fails:** Ensure the Apple TV and server are on the same local network. Try restarting the Apple TV.
-- **Reset pairing:** Delete `data/airplay-pairings.json` on the server, or unpair the device via the API.
+- **Reset pairing:** Unpair the device via the API, or delete `airplay-pairings.json` from the data directory
+  (`docker exec homecast rm /app/data/airplay-pairings.json` in Docker) and restart.
 - **"Everyone" mode not working:** Some Apple TV models require at least one pairing before accepting unauthenticated
   connections. Try pairing once even if set to "Everyone."
 
@@ -312,7 +337,7 @@ HomeCast acts as a bridge between web content and your devices, handling:
 - **AirPlay**: SRP-6a PIN pairing (2048-bit), Curve25519 + Ed25519 pair-verify
 - **Caching**: Adaptive (4s for live, 60s for VOD)
 - **Performance**: Connection pooling, DNS caching, 256KB buffers
-- **Image**: Alpine Linux (~70MB)
+- **Image**: Debian slim (`node:26-slim`); the full image adds Playwright's headless Chromium
 
 ## Development
 
@@ -328,7 +353,9 @@ physical device.
 ### Testing & Quality Control
 
 ```bash
-npm test                    # Run all tests
+npm test                    # Run all tests (node:test)
+
+npm run test:coverage       # Run all tests with a coverage report
 
 npm run lint                # Run ESLint
 
@@ -344,18 +371,20 @@ This project uses GitHub Actions for continuous integration and deployment:
 - **Test workflow** (`test.yml`): Runs on all branches and PRs
     - Linting with ESLint
     - Type checking with TypeScript
-    - Unit tests
+    - Unit tests, plus HTTP tests against the fully wired server
 
-- **Docker workflow** (`docker.yml`): Runs on `main` branch and version tags
-    - Builds multi-platform Docker images (amd64, arm64)
+- **Docker workflow** (`docker.yml`): Runs on version tags (`v*.*.*`)
+    - Builds multi-platform Docker images (amd64, arm64), in `full` and `lite` variants
     - Publishes to GitHub Container Registry
     - Creates attestations for supply chain security
-    - Tags: `latest`, version tags (e.g., `v1.0.0`)
+    - Tags: `latest`, plus the version at each precision (e.g. `1.2.3`, `1.2`, `1`)
 
 **Docker images are available at:**
 
 - `ghcr.io/simno/homecast:latest` — Latest stable release
-- `ghcr.io/simno/homecast:v*.*.*` — Specific version tags
+- `ghcr.io/simno/homecast:lite` — Latest stable release, without the headless browser
+- `ghcr.io/simno/homecast:1.2.3` / `1.2.3-lite` — A specific version (`1.2`, `1` and their `-lite` forms track the
+  latest patch/minor)
 
 ### Release Process
 

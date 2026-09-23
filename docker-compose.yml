@@ -9,6 +9,10 @@ services:
     container_name: homecast
     network_mode: host  # Required for mDNS device discovery
     restart: unless-stopped
+    volumes:
+      # AirPlay pairing credentials; without this, Apple TVs must be
+      # re-paired every time the container is re-created (e.g. on upgrade)
+      - homecast-data:/app/data
     environment:
       - NODE_ENV=production
       - PORT=3000  # Change this to use a different port
@@ -33,3 +37,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  homecast-data:

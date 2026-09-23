@@ -1,16 +1,7 @@
+const { test, before, after } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const { isLiveHlsStream } = require('../lib/extraction');
-
-console.log('Running Live Detection Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-const tests = [];
-function test(description, fn) {
-    tests.push({ description, fn });
-}
 
 // A media playlist that is still growing: no #EXT-X-ENDLIST.
 const LIVE_MEDIA = [
@@ -105,29 +96,9 @@ test('404 playlist is undetermined', async () => {
     assert.strictEqual(await isLiveHlsStream(`${base}/missing.m3u8`), null);
 });
 
-async function run() {
+before(async () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
+});
 
-    for (const { description, fn } of tests) {
-        try {
-            await fn();
-            console.log(`✓ ${description}`);
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${description}`);
-            console.error(`  ${err.message}`);
-            failed++;
-        }
-    }
-
-    server.close();
-
-    console.log('\n' + '='.repeat(50));
-    console.log(`Results: ${passed} passed, ${failed} failed`);
-    console.log('='.repeat(50) + '\n');
-
-    if (failed > 0) process.exit(1);
-}
-
-run();
+after(() => server.close());

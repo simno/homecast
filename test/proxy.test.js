@@ -1,9 +1,6 @@
+const { test } = require('node:test');
+const assert = require('assert');
 const { resolveM3u8Url } = require('../lib/proxy');
-
-console.log('Running M3U8 URL Resolution Tests...\n');
-
-let passed = 0;
-let failed = 0;
 
 const testCases = [
     // Comments and tags
@@ -113,37 +110,10 @@ const testCases = [
     }
 ];
 
-testCases.forEach(({ name, input, base, expected }, index) => {
-    try {
-        const baseUrl = new URL(base);
-        const result = resolveM3u8Url(input, baseUrl);
-
-        if (result.isUrl !== expected.isUrl) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log(`   Expected isUrl: ${expected.isUrl}, Got: ${result.isUrl}`);
-            failed++;
-            return;
-        }
-
-        if (expected.url !== undefined && result.url !== expected.url) {
-            console.log(`❌ Test ${index + 1} FAILED: ${name}`);
-            console.log(`   Expected: ${expected.url}`);
-            console.log(`   Got: ${result.url}`);
-            failed++;
-            return;
-        }
-
-        console.log(`✓ Test ${index + 1}: ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`❌ Test ${index + 1} ERROR: ${name}`);
-        console.log(`   ${err.message}`);
-        failed++;
-    }
-});
-
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log(`${'='.repeat(50)}`);
-
-process.exit(failed > 0 ? 1 : 0);
+for (const { name, input, base, expected } of testCases) {
+    test(name, () => {
+        const result = resolveM3u8Url(input, new URL(base));
+        assert.strictEqual(result.isUrl, expected.isUrl);
+        if (expected.url !== undefined) assert.strictEqual(result.url, expected.url);
+    });
+}

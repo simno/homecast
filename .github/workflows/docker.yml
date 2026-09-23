@@ -11,8 +11,20 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and Push Docker Image
+    name: Build and Push Docker Image (${{ matrix.variant }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # full: with the headless browser (Playwright Chromium) -> latest, 1.2.3, 1.2, 1
+          - variant: full
+            suffix: ''
+            floating: latest
+          # lite: no browser -> lite, 1.2.3-lite, 1.2-lite, 1-lite
+          - variant: lite
+            suffix: '-lite'
+            floating: lite
     permissions:
       contents: read
       packages: write
@@ -38,23 +50,28 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest is set explicitly below; don't let semver tags add it to lite too
+          flavor: |
+            latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=semver,pattern={{version}},suffix=${{ matrix.suffix }}
+            type=semver,pattern={{major}}.{{minor}},suffix=${{ matrix.suffix }}
+            type=semver,pattern={{major}},suffix=${{ matrix.suffix }}
+            type=raw,value=${{ matrix.floating }}
 
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
+          build-args: |
+            VARIANT=${{ matrix.variant }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v4

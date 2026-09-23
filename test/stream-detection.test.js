@@ -1,21 +1,5 @@
+const { test } = require('node:test');
 const assert = require('assert');
-
-console.log('Running Stream Detection Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-function test(description, fn) {
-    try {
-        fn();
-        console.log(`✓ ${description}`);
-        passed++;
-    } catch (err) {
-        console.error(`✗ ${description}`);
-        console.error(`  ${err.message}`);
-        failed++;
-    }
-}
 
 // ============================================
 // Frame Rate Detection Tests
@@ -344,14 +328,3 @@ test('State: Accept fresh state (<24 hours)', () => {
     assert.strictEqual(isStale, false);
 });
 
-// ============================================
-// Results
-// ============================================
-
-console.log('\n' + '='.repeat(50));
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log('='.repeat(50) + '\n');
-
-if (failed > 0) {
-    process.exit(1);
-}

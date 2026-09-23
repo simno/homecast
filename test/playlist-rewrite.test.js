@@ -1,22 +1,6 @@
+const { test } = require('node:test');
 const assert = require('assert');
 const { rewritePlaylist, buildProxyUrl } = require('../lib/proxy');
-
-console.log('Running Playlist Rewrite Tests...\n');
-
-let passed = 0;
-let failed = 0;
-
-function test(description, fn) {
-    try {
-        fn();
-        console.log(`✓ ${description}`);
-        passed++;
-    } catch (err) {
-        console.error(`✗ ${description}`);
-        console.error(`  ${err.message}`);
-        failed++;
-    }
-}
 
 const BASE = new URL('https://cdn.example/show/ep1/master.m3u8');
 // Mark each rewritten reference so the tests can see what went through.
@@ -66,8 +50,3 @@ test('buildProxyUrl encodes every part and adds the playlist hint only for HLS',
     assert.ok(hls.endsWith('&referer=&quality=highest&type=hls'), hls);
 });
 
-console.log('\n' + '='.repeat(50));
-console.log(`Results: ${passed} passed, ${failed} failed`);
-console.log('='.repeat(50) + '\n');
-
-if (failed > 0) process.exit(1);

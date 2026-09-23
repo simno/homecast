@@ -180,7 +180,7 @@ setInterval(() => {
     if (cleaned > 0) {
         console.log(`[Cache] Cleaned ${cleaned} playlist entries`);
     }
-}, 120000);
+}, 120000).unref(); // housekeeping only; don't hold the process open
 
 // Which cast device a proxy request belongs to, and that device's stats
 // (created on first sight). Also feeds the health and stall monitors.

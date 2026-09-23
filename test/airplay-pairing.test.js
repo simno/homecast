@@ -1,4 +1,5 @@
 // AirPlay Pairing unit tests
+const { test, after } = require('node:test');
 const crypto = require('crypto');
 const { encodeBPlist, decodeBPlist } = require('../lib/bplist');
 const { computeSRP, verifyServerProof } = require('../lib/airplay-pairing');
@@ -6,22 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-let passed = 0;
-let failed = 0;
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'homecast-test-'));
-
-function test(name, fn) {
-    try {
-        fn();
-        passed++;
-        console.log(`✓ ${name}`);
-    } catch (e) {
-        failed++;
-        console.error(`✗ ${name}: ${e.message}`);
-    }
-}
-
-console.log('Running AirPlay Pairing tests...\n');
 
 // ===== Binary Plist Tests =====
 
@@ -159,19 +145,18 @@ function requireFresh(modulePath) {
     return require(modulePath);
 }
 
-test('initPairingStore creates file if not present', async () => {
-    const storeFile = path.join(tmpDir, 'pairings.json');
+test('initPairingStore creates the data directory and starts empty when no file exists', async () => {
+    // A fresh volume mount: neither the directory nor the file exists yet.
+    const storeFile = path.join(tmpDir, 'fresh', 'pairings.json');
     process.env.AIRPLAY_PAIRING_STORE = storeFile;
 
     const store = requireFresh('../lib/airplay-pairing-store');
     await store.initPairingStore();
 
-    // Check that file was created
-    if (!fs.existsSync(storeFile)) throw new Error('Store file not created');
-    const raw = fs.readFileSync(storeFile, 'utf8');
-    const data = JSON.parse(raw);
-    if (data.version !== 1) throw new Error('Expected version 1');
-    if (!data.pairs) throw new Error('Expected pairs object');
+    if (!fs.existsSync(path.dirname(storeFile))) throw new Error('Data directory not created');
+    // The file itself is only written on the first save.
+    if (fs.existsSync(storeFile)) throw new Error('Store file written before any pairing was saved');
+    if (store.getAllPairings().length !== 0) throw new Error('Expected no pairings');
 });
 
 test('setPairing and getPairing round-trip', async () => {
@@ -273,10 +258,6 @@ test('bplist module exports expected functions', () => {
 
 // ===== Cleanup =====
 
-// Remove temp dir
-try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+// Remove temp dir once every test has finished with it
+after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
-// ===== Results =====
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);
