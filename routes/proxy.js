@@ -72,7 +72,7 @@ async function fetchUpstream(url, headers, axiosConfig) {
     const retryWithoutReferer = async (status) => {
         console.log(`[Proxy] Upstream returned ${status} with referer, retrying without...`);
         const response = await axios({ ...axiosConfig, url, headers: withoutReferer(headers) });
-        noteRefererRejected(url);
+        if (response.status < 400) noteRefererRejected(url);
         return response;
     };
 
