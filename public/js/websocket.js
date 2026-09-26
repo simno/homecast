@@ -20,7 +20,7 @@ function onStreamStats(data) {
     // Update current values; the 1Hz tick samples these into history
     // so the graphs' x-axis is real time, not segment count.
     stream.currentRate = parseFloat(data.stats.transferRate) || 0;
-    if (data.stats.delay !== undefined && data.stats.delay > 0) {
+    if (!stream.ended && data.stats.delay !== undefined && data.stats.delay > 0) {
         stream.currentDelay = parseFloat(data.stats.delay) || 0;
         stream.hasDelay = true;
     }
@@ -57,7 +57,7 @@ function onPlayerStatus(data) {
         }
 
         const entry = state.streams.get(ip);
-        applyPlayerStatus(entry, data.status);
+        applyPlayerStatus(entry, data.status, data.ended);
         if (ip === state.activeStreamIp) {
             renderPlayback(entry);
             if (playerState === 'PLAYING') updateStatus('Now Playing', 'success');

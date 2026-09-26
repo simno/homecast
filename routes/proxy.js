@@ -18,6 +18,7 @@ const { validateProxyUrl, safeRequestOptions } = require('../lib/security');
 const { broadcast } = require('../lib/websocket');
 const { updateHeartbeat } = require('../lib/health');
 const { trackStreamActivity } = require('../lib/recovery');
+const { markBroadcastEnded } = require('../lib/cast');
 const {
     tryNextSegment,
     filterMasterPlaylist,
@@ -182,6 +183,14 @@ setInterval(() => {
         console.log(`[Cache] Cleaned ${cleaned} playlist entries`);
     }
 }, 120000).unref(); // housekeeping only; don't hold the process open
+
+// A media playlist (one listing segments, not variants) that ends in
+// #EXT-X-ENDLIST: if the device was playing it live, the broadcast is over.
+function noteClosedPlaylist(deviceIp, m3u8) {
+    if (deviceIp && m3u8.includes('#EXT-X-ENDLIST') && m3u8.includes('#EXTINF')) {
+        markBroadcastEnded(deviceIp);
+    }
+}
 
 // Which cast device a proxy request belongs to, and that device's stats
 // (created on first sight). Also feeds the health and stall monitors.
@@ -533,6 +542,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 const age = Math.round((Date.now() - cached.timestamp) / 1000);
                 console.log(`[Proxy] Serving cached playlist (${cached.isLive ? 'LIVE' : 'VOD'}, age: ${age}s): ${url.substring(0, 80)}...`);
                 stats.cacheHits++;
+                noteClosedPlaylist(deviceIp, cached.content);
                 res.set('Content-Type', contentType);
                 return res.send(cached.content);
             }
@@ -552,6 +562,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             }
 
             const { filteredM3u8, rewrittenM3u8, isLive } = result;
+            noteClosedPlaylist(deviceIp, filteredM3u8);
 
             // Cap a master playlist to the requested quality (no-op for media
             // playlists and for quality=auto). Stats below are parsed from the

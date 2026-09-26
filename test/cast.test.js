@@ -20,6 +20,8 @@ let server;
 let devices;
 let activeSessions;
 let streamStats;
+let streamRecovery;
+let getLocalIp;
 let deviceListener;
 
 const upstream = http.createServer((req, res) => {
@@ -59,7 +61,8 @@ before(async () => {
     await new Promise((resolve) => probe.close(resolve));
 
     ({ server } = require('../server'));
-    ({ devices, activeSessions, streamStats } = require('../lib/state'));
+    ({ devices, activeSessions, streamStats, streamRecovery } = require('../lib/state'));
+    ({ getLocalIp } = require('../lib/utils'));
     await new Promise((resolve) => server.listen(Number(process.env.PORT), '0.0.0.0', resolve));
     base = `http://127.0.0.1:${process.env.PORT}`;
 });
@@ -214,12 +217,51 @@ test('an unreachable device without a known MAC fails fast with an explanation',
     assert.strictEqual(activeSessions.has(MOCK_IP), false);
 });
 
+test('a broadcast the receiver reports as done plays out and ends without a restart', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/live.m3u8`, type: 'hls' });
+    const mock = receiver();
+    clearTimeout(mock.startTimeout); // skip the mock's simulated start-up buffering
+    mock.play();
+
+    mock.endBroadcast();
+    assert.strictEqual(activeSessions.get(MOCK_IP).broadcastEnded, true);
+
+    // Jump to just before the end so it finishes on the mock's next tick.
+    mock.seek(mock.liveEdgeTime - 0.2);
+    assert.ok(await waitFor(() => !activeSessions.has(MOCK_IP), 3000), 'the session should end with playback');
+    assert.strictEqual(mock.idleReason, 'FINISHED');
+    assert.strictEqual(streamRecovery.has(MOCK_IP), false, 'recovery must not restart a finished stream');
+});
+
+test('a live playlist that closes through the proxy marks the broadcast ended', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/live.m3u8`, type: 'hls' });
+    assert.strictEqual(activeSessions.get(MOCK_IP).broadcastEnded, false);
+
+    // The receiver's own request, from the address its session is mapped to.
+    const proxied = `http://${getLocalIp()}:${process.env.PORT}/proxy?type=hls&url=${encodeURIComponent(`${cdn}/vod.m3u8`)}`;
+    assert.strictEqual((await fetch(proxied)).status, 200);
+    assert.strictEqual(activeSessions.get(MOCK_IP).broadcastEnded, true);
+});
+
+test('a closed playlist does not mark a recording as an ended broadcast', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/vod.m3u8`, type: 'hls' });
+    const proxied = `http://${getLocalIp()}:${process.env.PORT}/proxy?type=hls&url=${encodeURIComponent(`${cdn}/vod.m3u8`)}`;
+    await fetch(proxied);
+    assert.strictEqual(activeSessions.get(MOCK_IP).broadcastEnded, false);
+});
+
 test('seeks land inside the live window, short of the edge', () => {
     const { clampSeek } = require('../lib/cast');
     const status = { liveSeekableRange: { start: 100, end: 1100, isMovingWindow: true } };
     assert.strictEqual(clampSeek(status, 500), 500);
     assert.strictEqual(clampSeek(status, 20), 100);
     assert.strictEqual(clampSeek(status, 5000), 1085);
+    // Once the broadcast is done its end is fixed and reachable.
+    const done = { liveSeekableRange: { start: 100, end: 1100, isMovingWindow: false, isLiveDone: true } };
+    assert.strictEqual(clampSeek(done, 5000), 1099);
 });
 
 test('seeks in a recording stop short of its end', () => {

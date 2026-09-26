@@ -192,7 +192,7 @@ export function startDashboardTimers({ onStale }) {
 
             if (ip === state.activeStreamIp) {
                 drawRateGraph(stream.rateHistory);
-                if (stream.delayHistory.length > 0) drawDelayGraph(stream.delayHistory);
+                drawDelayGraph(stream.delayHistory);
                 renderPosition(stream);
             }
         });

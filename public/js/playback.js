@@ -40,6 +40,12 @@ export function renderPosition(stream) {
         el.textContent = stream.currentDelay > 0 ? `Live · ${formatDelay(stream.currentDelay)} behind` : 'Live';
         return;
     }
+    if (stream.ended) {
+        const win = timelineWindow(stream);
+        const left = win && stream.position ? win.end - currentPosition(stream, stream.playerState) : 0;
+        el.textContent = left >= 1 ? `Broadcast ended · ${formatDelay(left)} left` : 'Broadcast ended';
+        return;
+    }
     const pos = stream.position;
     if (!pos || pos.currentTime === undefined) {
         el.textContent = '';
@@ -95,13 +101,26 @@ export function renderPlayback(stream) {
     renderVolume(stream);
 }
 
-// Update what the dashboard shows from a device status report.
-export function applyPlayerStatus(stream, status) {
+// Update what the dashboard shows from a device status report. `ended`: the
+// server's word that the live broadcast has finished.
+export function applyPlayerStatus(stream, status, ended = false) {
     if (status.playerState) stream.playerState = status.playerState;
     if (status.liveSeekableRange) {
         const { start, end, isMovingWindow } = status.liveSeekableRange;
         stream.live = !!isMovingWindow;
         stream.liveRange = { start: start || 0, end, moving: !!isMovingWindow, at: Date.now() };
+    }
+    if (ended && !stream.ended) {
+        // Nothing is live any more: stop sliding the window, and drop the
+        // "behind live" figures in favour of a countdown to the end.
+        stream.ended = true;
+        stream.currentDelay = 0;
+        stream.hasDelay = false;
+        stream.delayHistory = [];
+    }
+    if (stream.ended) {
+        stream.live = false;
+        if (stream.liveRange) stream.liveRange.moving = false;
     }
     else if (status.media?.streamType) stream.live = status.media.streamType === 'LIVE';
     if (status.currentTime !== undefined) {
@@ -308,7 +327,7 @@ function wireTimeline() {
 // Jump to `time`, showing the new position straight away; the device's
 // status report confirms it.
 async function seekTo(stream, win, time) {
-    const latest = stream.liveRange ? Math.max(win.start, win.end - LIVE_EDGE_OFFSET_S) : win.end;
+    const latest = stream.liveRange && !stream.ended ? Math.max(win.start, win.end - LIVE_EDGE_OFFSET_S) : win.end;
     const target = Math.min(Math.max(time, win.start), latest);
     const previous = stream.position;
     stream.position = { ...stream.position, currentTime: target, at: Date.now() };
