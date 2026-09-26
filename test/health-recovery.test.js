@@ -15,7 +15,7 @@ const MEDIA = { contentId: 'http://h/proxy?url=x', contentType: 'application/x-m
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 // A castv2 session whose player answers as told and records what it's asked.
-function fakeSession({ statusOk = true } = {}) {
+function fakeSession({ statusOk = true, stopThrows = false } = {}) {
     const calls = [];
     const session = {
         client: { close: () => calls.push('close') },
@@ -26,6 +26,8 @@ function fakeSession({ statusOk = true } = {}) {
             },
             stop: (cb) => {
                 calls.push('stop');
+                // castv2 reads currentSession.mediaSessionId synchronously.
+                if (stopThrows) throw new TypeError("Cannot read properties of undefined (reading 'mediaSessionId')");
                 cb();
             },
             load: (media, options, cb) => {
@@ -166,6 +168,20 @@ test('recovery stops after 3 attempts', async () => {
     mock.timers.tick(15_001);
     await runRecovery();
     assert.deepStrictEqual(calls, []);
+});
+
+test('a session that cannot be stopped is still reloaded', async () => {
+    // A receiver that answers a status probe with an empty status array leaves
+    // castv2's currentSession undefined, and stop() then throws before it can
+    // send. The reload is the point of the recovery; a failed stop must not
+    // abandon it, which is how a recoverable stall became a dead session.
+    const { calls } = stalledSession({ stopThrows: true });
+    mock.timers.tick(15_001);
+    await runRecovery();
+
+    assert.strictEqual(calls[0], 'stop');
+    assert.deepStrictEqual(calls[1].load, MEDIA);
+    assert.strictEqual(streamRecovery.get(IP).stallDetected, false, 'the reload went ahead');
 });
 
 test('a stream that went idle on its own is reloaded', async () => {

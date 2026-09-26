@@ -58,6 +58,9 @@ const pages = {
     '/pages/script.html': '<script src="/js/player-config.js"></script>',
     '/pages/nothing.html': '<div id="app"></div><script>boot()</script>',
     '/pages/soft404.html': '<video src="/media/html.mp4"></video><video src="/media/dead.mp4"></video>',
+    // The shape of the reported outage: a page that loads fine and offers one
+    // stream URL that the CDN refuses to everyone.
+    '/pages/refused.html': '<video src="/refused.m3u8"></video>',
     '/pages/extensionless.html': '<video><source src="/api/stream/7" type="application/x-mpegURL"></video>',
     '/pages/sniff.html': '<video src="/api/progressive/9"></video>',
     '/pages/tracks.html': `<video src="/media/clip.mp4">
@@ -92,6 +95,20 @@ const server = http.createServer((req, res) => {
         return res.end(SUBBED_MASTER);
     }
     if (/^\/v\/\d+\/index\.m3u8$/.test(path)) return res.end(MEDIA);
+    // Referer-sensitive pair: one CDN that refuses any Referer, one that
+    // refuses everything (as lb12.strmd.st did, for every path and client).
+    if (path === '/refuses-referer.m3u8') {
+        if (req.headers.referer) {
+            res.statusCode = 403;
+            return res.end('no hotlinking');
+        }
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        return res.end(MASTER);
+    }
+    if (path === '/refused.m3u8') {
+        res.statusCode = 403;
+        return res.end('forbidden');
+    }
     if (path === '/api/stream/7') {
         res.setHeader('Content-Type', 'text/plain');
         return res.end(MASTER);
@@ -171,6 +188,19 @@ test('an extensionless URL is identified by sniffing the response', async () => 
     const { videos } = await findStreams(`${base}/api/stream/7`, noBrowser);
     assert.strictEqual(videos[0].type, 'hls');
     assert.strictEqual(videos[0].url, `${base}/api/stream/7`);
+});
+
+test('a candidate that only refuses the Referer is kept, probed bare', async () => {
+    const { videos } = await findStreams(`${base}/refuses-referer.m3u8`, noBrowser);
+    assert.strictEqual(videos[0].url, `${base}/refuses-referer.m3u8`);
+    assert.strictEqual(videos[0].type, 'hls');
+    assert.deepStrictEqual(videos[0].qualities.map(q => q.label), ['720p', '360p']);
+});
+
+test('a candidate refused with and without the Referer is dead, not offered', async () => {
+    // The proxy would send the same two requests and get the same refusals, so
+    // offering this would only cast a URL that cannot play.
+    await expectFinderError(findStreams(`${base}/pages/refused.html`, noBrowser), 404);
 });
 
 // --- Page scanning ---
