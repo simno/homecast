@@ -87,6 +87,16 @@ function drawRateGraph(rateHistory) {
 const DELAY_WARN_S = 45;
 const DELAY_BAD_S = 90;
 
+// "45s", or "15m 40s" once it's a minute or more.
+export function formatDelay(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    if (s < 60) return `${s}s`;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const rest = `${m}m ${s % 60}s`;
+    return h > 0 ? `${h}h ${rest}` : rest;
+}
+
 function delayColor(delay) {
     if (delay >= DELAY_BAD_S) return graphColors.danger;
     if (delay >= DELAY_WARN_S) return graphColors.warning;
@@ -105,7 +115,7 @@ function drawDelayGraph(delayHistory) {
 
     const delay = delayHistory[delayHistory.length - 1] || 0;
     const delayEl = document.getElementById('graph-current-delay');
-    delayEl.textContent = `${delay.toFixed(1)}s`;
+    delayEl.textContent = delay < 60 ? `${delay.toFixed(1)}s` : formatDelay(delay);
     delayEl.style.color = delayColor(delay);
 
     const canvas = document.getElementById('delay-graph');
@@ -126,7 +136,8 @@ function drawDelayGraph(delayHistory) {
 
     const yLabelsDiv = document.getElementById('delay-y-labels');
     if (yLabelsDiv) {
-        yLabelsDiv.innerHTML = `<span>${maxDelay.toFixed(1)}s</span><span>${(maxDelay * 0.5).toFixed(1)}s</span><span>0.0s</span>`;
+        const label = (d) => d < 60 ? `${d.toFixed(1)}s` : formatDelay(d);
+        yLabelsDiv.innerHTML = `<span>${label(maxDelay)}</span><span>${label(maxDelay * 0.5)}</span><span>0.0s</span>`;
     }
 
     const padding = 10;

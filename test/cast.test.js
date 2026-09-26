@@ -213,3 +213,18 @@ test('an unreachable device without a known MAC fails fast with an explanation',
     assert.match(res.body.error, new RegExp(`Cannot reach device at ${MOCK_IP}:${port}.*Wake-on-LAN`));
     assert.strictEqual(activeSessions.has(MOCK_IP), false);
 });
+
+test('seeks land inside the live window, short of the edge', () => {
+    const { clampSeek } = require('../lib/cast');
+    const status = { liveSeekableRange: { start: 100, end: 1100, isMovingWindow: true } };
+    assert.strictEqual(clampSeek(status, 500), 500);
+    assert.strictEqual(clampSeek(status, 20), 100);
+    assert.strictEqual(clampSeek(status, 5000), 1085);
+});
+
+test('seeks in a recording stop short of its end', () => {
+    const { clampSeek } = require('../lib/cast');
+    assert.strictEqual(clampSeek({ media: { duration: 600 } }, 900), 599);
+    assert.strictEqual(clampSeek({ media: { duration: 600 } }, -5), 0);
+    assert.strictEqual(clampSeek({}, 42), 42);
+});

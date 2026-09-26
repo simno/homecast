@@ -175,6 +175,7 @@ test('playback control rejects actions and values it does not know', async () =>
     for (const body of [
         { ip: '192.168.1.50', action: 'rewind' },
         { ip: '192.168.1.50', action: 'seek', value: 'soon' },
+        { ip: '192.168.1.50', action: 'seekTo', value: -1 },
         { ip: '192.168.1.50', action: 'volume', value: 2 },
         { ip: '192.168.1.50', action: 'mute', value: 'yes' },
         { ip: 'not-an-ip', action: 'pause' }
@@ -186,6 +187,11 @@ test('playback control rejects actions and values it does not know', async () =>
 
 test('playback control on a device with nothing playing is a 404', async () => {
     const res = await postJson('/api/playback', { ip: '192.168.1.50', action: 'pause' }, await csrf());
+    assert.strictEqual(res.status, 404);
+});
+
+test('jumping to live is a known action: with nothing playing it is a 404', async () => {
+    const res = await postJson('/api/playback', { ip: '192.168.1.50', action: 'live' }, await csrf());
     assert.strictEqual(res.status, 404);
 });
 

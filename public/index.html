@@ -218,6 +218,13 @@
 
                     <!-- Remote control -->
                     <div class="playback-card">
+                        <div id="timeline" class="timeline hidden" role="slider" tabindex="0" aria-label="Playback position">
+                            <div class="timeline-track">
+                                <div id="timeline-fill" class="timeline-fill"></div>
+                                <div id="timeline-thumb" class="timeline-thumb"></div>
+                            </div>
+                            <div id="timeline-tip" class="timeline-tip hidden"></div>
+                        </div>
                         <div class="transport">
                             <button id="seek-back-btn" class="icon-btn" type="button" title="Back 10 seconds" aria-label="Back 10 seconds">
                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -243,6 +250,7 @@
                                 </svg>
                             </button>
                             <span id="playback-position" class="playback-position" aria-live="off"></span>
+                            <button id="go-live-btn" class="go-live-btn hidden" type="button" title="Jump to the live broadcast">Go live</button>
                         </div>
                         <div id="volume-control" class="volume">
                             <button id="mute-btn" class="icon-btn" type="button" title="Mute" aria-label="Mute">

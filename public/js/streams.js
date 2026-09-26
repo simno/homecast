@@ -20,6 +20,7 @@ export function createStreamEntry(ip, deviceName, deviceType) {
         notice: null,               // { message, type } shown above the dashboard
         playerState: 'PLAYING',
         position: null,             // { currentTime, duration, at } from the device
+        liveRange: null,            // { start, end, moving, at }: a live stream's seekable window
         live: false,
         volume: null,               // { level, muted }, Chromecast only
         subtitles: { tracks: [], activeTrackId: null },

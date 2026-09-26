@@ -160,14 +160,18 @@ router.post('/api/stop', async (req, res) => {
 
 // --- API: Playback Control ---
 // action: 'pause' | 'play' | 'seek' (value: seconds to skip, -3600..3600)
+// | 'seekTo' (value: position in seconds) | 'live' (jump to the live edge, Chromecast only)
 // | 'volume' (value: 0-1, Chromecast only) | 'mute' (value: boolean, Chromecast only)
 function validPlaybackValue(action, value) {
-    if (action === 'pause' || action === 'play') return true;
+    if (action === 'pause' || action === 'play' || action === 'live') return true;
     if (action === 'seek') return Number.isFinite(value) && Math.abs(value) <= 3600;
+    if (action === 'seekTo') return Number.isFinite(value) && value >= 0;
     if (action === 'volume') return Number.isFinite(value) && value >= 0 && value <= 1;
     if (action === 'mute') return typeof value === 'boolean';
     return false;
 }
+
+const PLAYBACK_VERBS = { play: 'resume', live: 'jump to live' };
 
 router.post('/api/playback', async (req, res) => {
     const { ip, action, value } = req.body;
@@ -185,6 +189,9 @@ router.post('/api/playback', async (req, res) => {
     if (airplay && (action === 'volume' || action === 'mute')) {
         return res.status(400).json({ error: 'Set the volume with the Apple TV remote' });
     }
+    if (airplay && action === 'live') {
+        return res.status(400).json({ error: 'Jumping to live is not supported on Apple TV' });
+    }
 
     try {
         const result = airplay
@@ -193,7 +200,7 @@ router.post('/api/playback', async (req, res) => {
         res.json(result);
     } catch (err) {
         console.error(`[Playback] ${action} failed on ${ip}:`, err.message);
-        res.status(502).json({ error: `Could not ${action === 'play' ? 'resume' : action}: ${err.message}` });
+        res.status(502).json({ error: `Could not ${PLAYBACK_VERBS[action] || action}: ${err.message}` });
     }
 });
 
