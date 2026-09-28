@@ -34,6 +34,12 @@ export function addRecent(url, title) {
     renderRecent();
 }
 
+function removeRecent(url) {
+    const list = loadRecent().filter(e => e.url !== url);
+    write(RECENT_KEY, list.length > 0 ? list : null);
+    renderRecent();
+}
+
 export function lastDevice() {
     const ip = read(LAST_DEVICE_KEY, null);
     return typeof ip === 'string' ? ip : null;
@@ -75,13 +81,35 @@ export function renderRecent() {
         host.textContent = hostOf(entry.url);
 
         btn.append(title, host);
-        li.appendChild(btn);
+
+        // A sibling, not inside the row's button: a button can't hold another.
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'recent-remove';
+        remove.dataset.url = entry.url;
+        remove.title = 'Remove from recent';
+        remove.setAttribute('aria-label', `Remove ${entry.title || hostOf(entry.url)} from recent`);
+        remove.textContent = '\u00d7';
+
+        li.append(btn, remove);
         recentList.appendChild(li);
     }
 }
 
 export function wireRecentControls({ onPick }) {
     recentList.addEventListener('click', (e) => {
+        const remove = e.target.closest('.recent-remove');
+        if (remove) {
+            // Keep keyboard focus in the list: on the next row's remove
+            // button, or the URL field once the list is gone.
+            const row = remove.closest('li');
+            const next = (row.nextElementSibling || row.previousElementSibling)?.querySelector('.recent-remove');
+            const nextUrl = next?.dataset.url;
+            removeRecent(remove.dataset.url);
+            const target = nextUrl && [...recentList.querySelectorAll('.recent-remove')].find(b => b.dataset.url === nextUrl);
+            (target || videoUrlInput).focus();
+            return;
+        }
         const item = e.target.closest('.recent-item');
         if (!item) return;
         videoUrlInput.value = item.dataset.url;

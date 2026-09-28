@@ -614,6 +614,37 @@ body {
 
 .recent-item:hover { background: var(--md-surface-container-high); }
 
+.recent-list li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.recent-list .recent-item { flex: 1 1 auto; min-width: 0; }
+
+/* Remove one entry: shown on hover or keyboard focus, always on touch screens */
+.recent-remove {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: 1.25rem;
+  line-height: 1;
+  opacity: 0;
+}
+
+.recent-list li:hover .recent-remove,
+.recent-remove:focus-visible { opacity: 1; }
+
+.recent-remove:hover { background: var(--md-surface-container-highest); }
+
+@media (hover: none) {
+  .recent-remove { opacity: 1; }
+}
+
 .recent-item-title {
   flex: 1 1 auto;
   min-width: 0;
