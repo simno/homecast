@@ -11,7 +11,7 @@ const { execFileSync } = require('child_process');
 const WebSocket = require('ws');
 const { server } = require('../server');
 const { activeWebOsSessions } = require('../lib/state');
-const { declaredFrameRate, measuredFrameRate, tickRateFor, inspectSegment } = require('../lib/h264-timing');
+const { declaredFrameRate, measuredFrameRate, tickRateFor, inspectSegment, patchSegmentTiming, rewriteSps } = require('../lib/h264-timing');
 
 // SPS NAL units from real streams: X/Periscope 4K declaring 1000 fps, the same
 // after correction, and a plain x264 30 fps encode.
@@ -42,6 +42,9 @@ function makeMislabelledSegment() {
 }
 const SEGMENT = makeMislabelledSegment();
 
+// Several chunks long, so it is still arriving when the proxy looks at its start.
+const NOT_TS = Buffer.from(Array.from({ length: 3 * 1024 * 1024 }, (_, i) => (i * 7) % 256));
+
 let base;
 let cdn;
 
@@ -54,6 +57,15 @@ const upstream = http.createServer((req, res) => {
     if (path === '/show/seg.ts' && SEGMENT) {
         res.writeHead(200, { 'Content-Type': 'video/mp2t' });
         return res.end(SEGMENT);
+    }
+    // A CDN that names and labels its segments generically.
+    if (path === '/show/chunk/42' && SEGMENT) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        return res.end(SEGMENT);
+    }
+    if (path === '/show/clip.mp4') {
+        res.writeHead(200, { 'Content-Type': 'video/mp4' });
+        return res.end(NOT_TS);
     }
     res.writeHead(404);
     res.end();
@@ -97,6 +109,11 @@ test('picks the standard tick rate for a measured frame rate', () => {
     assert.strictEqual(tickRateFor(12), '24000/1000');
 });
 
+test('rewrites the SPS timing, re-escaping it', () => {
+    const fixed = rewriteSps(Buffer.from(SPS_X, 'hex'), 1001, 60000);
+    assert.strictEqual(fixed.toString('hex'), SPS_FIXED);
+});
+
 test('leaves segments that are not MPEG-TS alone', () => {
     assert.strictEqual(inspectSegment(Buffer.alloc(1000, 1)), null);
 });
@@ -105,6 +122,15 @@ test('finds the wrong header in a mislabelled segment', { skip: !SEGMENT && 'ffm
     const info = inspectSegment(SEGMENT);
     assert.strictEqual(info.declared, 1000);
     assert.strictEqual(info.fix, '60000/1001');
+});
+
+test('corrects the header in place, moving nothing else', { skip: !SEGMENT && 'ffmpeg with libx264 not available' }, () => {
+    const patched = patchSegmentTiming(SEGMENT, '60000/1001');
+    assert.strictEqual(patched.length, SEGMENT.length);
+    assert.ok(Math.abs(inspectSegment(patched).declared - 29.97) < 0.01);
+    let changed = 0;
+    for (let i = 0; i < SEGMENT.length; i++) if (patched[i] !== SEGMENT[i]) changed++;
+    assert.ok(changed > 0 && changed < 32, `${changed} bytes changed`);
 });
 
 // ===== Proxy =====
@@ -134,6 +160,18 @@ test('corrects the frame-rate header of a segment sent to an LG TV', { skip: !SE
     // Other receivers get the bytes as they came.
     const plain = Buffer.from(await (await fetch(proxyUrl(`${cdn}/show/seg.ts`))).arrayBuffer());
     assert.ok(plain.equals(SEGMENT));
+});
+
+test('recognises a TS segment by its content, not its name', { skip: !SEGMENT && 'ffmpeg with libx264 not available' }, async () => {
+    const res = await fetch(proxyUrl(`${cdn}/show/chunk/42`, '&device=webos'));
+    const fixed = Buffer.from(await res.arrayBuffer());
+    assert.ok(Math.abs(inspectSegment(fixed).declared - 29.97) < 0.01);
+});
+
+test('passes anything that is not TS through to an LG TV untouched', async () => {
+    const res = await fetch(proxyUrl(`${cdn}/show/clip.mp4`, '&device=webos'));
+    assert.strictEqual(res.status, 200);
+    assert.ok(Buffer.from(await res.arrayBuffer()).equals(NOT_TS));
 });
 
 // ===== Player page =====

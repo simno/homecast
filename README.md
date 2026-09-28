@@ -222,9 +222,12 @@ work on the TV too. Stop (or a video playing to its end) returns the TV to the i
   key (in `data/webos-keys.json`) and later casts start without asking.
 - **The TV must be able to reach HomeCast** on its port, since the TV fetches the player page and the stream from it.
   LG TVs always stream through HomeCast's proxy, whatever the "Proxy stream" setting.
-- **Choppy X/Periscope broadcasts**: these streams declare a wrong frame rate (1000 fps) in their video headers, which
-  LG's player takes at its word. HomeCast rewrites that header as the segments pass through (no re-encoding), which
-  needs FFmpeg: included in the amd64 image, or on the `PATH` when running HomeCast directly.
+- **A TV in standby is woken** with Wake-on-LAN when you cast to it, once HomeCast has been allowed on it. That needs
+  the TV's setting to turn on over the network ("TV On With Mobile" or "Turn on via Wi-Fi", depending on the model).
+- **Wrong frame-rate headers are corrected.** Some streams declare a frame rate in their video headers that doesn't
+  match the video (X/Periscope broadcasts claim 1000 fps), and LG's player takes it at its word and plays them
+  choppy. HomeCast compares each MPEG-TS segment's header with its timestamps and, where they disagree, rewrites just
+  the header as it passes through: no re-encoding, and no FFmpeg needed.
 - **Subtitles** are chosen when casting (a separate file, or a language from the stream); they can't be switched from
   the dashboard during playback.
 - DASH streams can't be cast this way; cast them to a Chromecast.

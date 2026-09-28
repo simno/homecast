@@ -1,6 +1,7 @@
 // AirPlay & WOL unit tests
 const { test } = require('node:test');
-const { extractMAC, sendWOL } = require('../lib/wol');
+const os = require('os');
+const { extractMAC, sendWOL, subnetBroadcasts } = require('../lib/wol');
 const { extractVideoFromHtml } = require('../lib/extraction');
 
 // ===== MAC Extraction =====
@@ -64,6 +65,19 @@ test('Send WOL rejects invalid MAC', async () => {
 });
 
 // ===== Extraction: don't match player page URLs as video =====
+test('subnetBroadcasts: the directed broadcast of each local network', (t) => {
+    t.mock.method(os, 'networkInterfaces', () => ({
+        en0: [{ family: 'IPv4', address: '192.168.2.51', netmask: '255.255.255.0', internal: false }],
+        en1: [{ family: 'IPv4', address: '10.1.40.7', netmask: '255.255.240.0', internal: false }],
+        lo0: [{ family: 'IPv4', address: '127.0.0.1', netmask: '255.0.0.0', internal: true }],
+        utun: [{ family: 'IPv6', address: 'fe80::1', netmask: 'ffff:ffff:ffff:ffff::', internal: false }]
+    }));
+    const addresses = subnetBroadcasts();
+    if (JSON.stringify(addresses) !== JSON.stringify(['192.168.2.255', '10.1.47.255'])) {
+        throw new Error(`Got ${JSON.stringify(addresses)}`);
+    }
+});
+
 test('extractVideoFromHtml: find .m3u8 URL', () => {
     const html = 'var src = "https://example.com/stream/video.m3u8?token=abc";';
     const result = extractVideoFromHtml(html);

@@ -1,4 +1,5 @@
 const express = require('express');
+const { PassThrough } = require('stream');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
 const {
@@ -364,27 +365,91 @@ function pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segment
     response.data.pipe(res, { highWaterMark: 256 * 1024 });
 }
 
-// Only TS segments carry the header lib/h264-timing.js corrects, and they're
-// small enough to hold whole (a direct MP4 file is neither).
+// Segments for an LG TV get their frame-rate header checked
+// (lib/h264-timing.js). Whether one is MPEG-TS is read from its first bytes,
+// not its name: many CDNs serve segments without a .ts extension or content
+// type. Anything else, or anything bigger than a segment (a continuous TS
+// stream never ends), is passed on as it arrives.
 const MAX_TIMED_SEGMENT_BYTES = 64 * 1024 * 1024;
-function isTsSegment(url, response) {
-    const length = parseInt(response.headers['content-length'] || '0', 10);
-    if (length > MAX_TIMED_SEGMENT_BYTES) return false;
-    if (/mp2t/i.test(response.headers['content-type'] || '')) return true;
-    try {
-        return /\.ts$/i.test(new URL(url).pathname);
-    } catch {
-        return false;
-    }
+const TS_SYNC_BYTE = 0x47;
+
+// The stream's first chunk, with the stream left paused; null if it's empty.
+function firstChunk(stream) {
+    return new Promise((resolve, reject) => {
+        const done = (fn) => (value) => {
+            stream.off('data', onData);
+            stream.off('end', onEnd);
+            stream.off('error', onError);
+            fn(value);
+        };
+        const onData = done((chunk) => { stream.pause(); resolve(chunk); });
+        const onEnd = done(() => resolve(null));
+        const onError = done(reject);
+        stream.on('data', onData);
+        stream.on('end', onEnd);
+        stream.on('error', onError);
+    });
 }
 
-// A segment for an LG TV: read whole, its frame-rate header corrected when
-// the source declares a wrong one (lib/h264-timing.js), then sent.
-async function serveTimedSegment(res, response, { deviceIp, stats, url, segmentSkipped }) {
-    const chunks = [];
-    for await (const chunk of response.data) chunks.push(chunk);
+// The rest of the stream after `first`, up to `limit` bytes. `complete` is
+// false when the limit was reached (the stream is paused there).
+function readUpTo(stream, first, limit) {
+    return new Promise((resolve, reject) => {
+        const chunks = [first];
+        // It may have ended while paused after its first chunk.
+        if (stream.readableEnded) return resolve({ chunks, complete: true });
+        let size = first.length;
+        const done = (fn) => (value) => {
+            stream.off('data', onData);
+            stream.off('end', onEnd);
+            stream.off('error', onError);
+            fn(value);
+        };
+        const onData = (chunk) => {
+            chunks.push(chunk);
+            size += chunk.length;
+            if (size > limit) done(() => { stream.pause(); resolve({ chunks, complete: false }); })();
+        };
+        const onEnd = done(() => resolve({ chunks, complete: true }));
+        const onError = done(reject);
+        stream.on('data', onData);
+        stream.on('end', onEnd);
+        stream.on('error', onError);
+        stream.resume();
+    });
+}
+
+// `stream` with `head` put back in front of whatever it has left.
+function prepend(stream, head) {
+    const combined = new PassThrough();
+    combined.write(head);
+    if (stream.readableEnded) combined.end();
+    else stream.pipe(combined);
+    stream.on('error', err => combined.destroy(err));
+    combined.on('close', () => stream.destroy());
+    return combined;
+}
+
+// Serve a segment to an LG TV: a whole TS segment with its frame-rate header
+// corrected when needed; anything else piped through as usual.
+async function serveTimedSegment(res, response, context) {
+    const length = parseInt(response.headers['content-length'] || '0', 10);
+    if (length > MAX_TIMED_SEGMENT_BYTES) return pipeUpstream(res, response, context);
+
+    const first = await firstChunk(response.data);
+    if (!first) return res.status(response.status).end();
+    if (first[0] !== TS_SYNC_BYTE) {
+        response.data = prepend(response.data, first);
+        return pipeUpstream(res, response, context);
+    }
+    const { chunks, complete } = await readUpTo(response.data, first, MAX_TIMED_SEGMENT_BYTES);
+    if (!complete) {
+        response.data = prepend(response.data, Buffer.concat(chunks));
+        return pipeUpstream(res, response, context);
+    }
     const body = await fixSegmentTiming(Buffer.concat(chunks));
 
+    const { deviceIp, stats, url, segmentSkipped } = context;
     stats.segmentCount++;
     stats.totalBytes += body.length;
     res.status(response.status);
@@ -878,7 +943,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             }
         }
 
-        if (device === 'webos' && isTsSegment(currentUrl, response) && !req.headers.range) {
+        if (device === 'webos' && !req.headers.range) {
             return await serveTimedSegment(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
         }
         pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
