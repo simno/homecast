@@ -35,6 +35,16 @@ export async function apiPost(path, body, options) {
     return post(path, body, options);
 }
 
+// Streams the server is playing now: [{ ip, type, deviceName }].
+export async function fetchRunningSessions() {
+    try {
+        const res = await fetch('/api/sessions');
+        return res.ok ? (await res.json()).sessions : [];
+    } catch {
+        return [];
+    }
+}
+
 export async function checkSessionStatus(deviceIp) {
     try {
         const res = await fetch(`/api/session/${encodeURIComponent(deviceIp)}`);

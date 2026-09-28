@@ -346,7 +346,7 @@ For these services, use their official apps or browser extensions.
 | `TRANSCODE_DEVICE`           | Auto (tries each `/dev/dri/renderD*`) | GPU for 4K conversion, e.g. `renderD129` or `/dev/dri/renderD129` |
 | `TRANSCODE_ENCODER`          | `auto`         | `auto`, `vaapi` (Intel, AMD), `nvenc` (NVIDIA), `videotoolbox` (Mac), `x265` (software, too slow for 4K; for testing) or `off` |
 | `TRANSCODE_BITRATE`          | `25M`          | Most a converted segment gets (each gets 4× its source bitrate up to this)   |
-| `TRANSCODE_CONCURRENCY`      | `2`            | Segments encoded at once                                                     |
+| `TRANSCODE_CONCURRENCY`      | `1`            | Segments encoded at once. Most GPUs have one video engine, where two encodes only take turns; try `2` on one with two |
 
 #### Advanced tuning
 
@@ -460,8 +460,8 @@ docker logs homecast | grep Transcode
 - With several Intel/AMD GPUs, set `TRANSCODE_DEVICE` to the right one (`ls -l /dev/dri/by-path` shows which render
   node belongs to which PCI slot)
 
-If conversion runs but the dashboard's **Speed** stays near or below 1×, the GPU can't keep up: lower
-`TRANSCODE_CONCURRENCY`, or check nothing else is using it.
+If conversion runs but the dashboard's **Speed** stays near or below 1×, the GPU can't keep up: check nothing else
+is using it (another transcoder, say), and that `TRANSCODE_CONCURRENCY` is `1`.
 
 ## How It Works
 

@@ -1,9 +1,10 @@
 const express = require('express');
 const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, devices } = require('../lib/state');
-const { castToDevice, stopCasting, controlPlayback } = require('../lib/cast');
+const { castToDevice, stopCasting, controlPlayback, sessionPlayback } = require('../lib/cast');
 const { castToAirPlayDevice, stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
 const { isAvailable: isTranscodeAvailable } = require('../lib/transcode');
+const { getBufferHealthStats } = require('../lib/stats');
 
 const router = express.Router();
 
@@ -92,8 +93,19 @@ router.post('/api/cast', (req, res) => {
     castToDevice(ip, url, !!proxy, referer || '', quality, res, type, subtitle, transcode);
 });
 
+// --- API: Running Sessions ---
+// Every stream playing now, so a page opened anywhere (another browser, a
+// phone) can show them — not just the one that started them.
+router.get('/api/sessions', (req, res) => {
+    const sessions = [
+        ...[...activeSessions.keys()].map(ip => ({ ip, type: 'chromecast' })),
+        ...[...activeAirPlaySessions.keys()].map(ip => ({ ip, type: 'airplay' }))
+    ].map(s => ({ ...s, deviceName: devices.get(s.ip)?.name || s.ip }));
+    res.json({ sessions });
+});
+
 // --- API: Get Session State ---
-router.get('/api/session/:ip', (req, res) => {
+router.get('/api/session/:ip', async (req, res) => {
     const { ip } = req.params;
 
     // Check Chromecast sessions
@@ -101,6 +113,9 @@ router.get('/api/session/:ip', (req, res) => {
     if (session) {
         const stats = streamStats.get(ip);
         const tracking = playbackTracking.get(ip);
+        // Where playback is, for a dashboard opened mid-stream: receivers
+        // only report it when something changes.
+        const playback = await sessionPlayback(ip);
         return res.json({
             active: true,
             type: 'chromecast',
@@ -108,7 +123,9 @@ router.get('/api/session/:ip', (req, res) => {
             tracking: tracking || null,
             hasPlayer: !!session.player,
             subtitles: subtitleState(ip),
-            volume: session.volume || null
+            volume: session.volume || null,
+            playback,
+            bufferHealth: getBufferHealthStats(ip)
         });
     }
 

@@ -23,6 +23,7 @@ let devices;
 let activeSessions;
 let streamStats;
 let streamRecovery;
+let bufferHealthTracking;
 let getLocalIp;
 let deviceListener;
 
@@ -69,7 +70,7 @@ before(async () => {
     await new Promise((resolve) => probe.close(resolve));
 
     ({ server } = require('../server'));
-    ({ devices, activeSessions, streamStats, streamRecovery } = require('../lib/state'));
+    ({ devices, activeSessions, streamStats, streamRecovery, bufferHealthTracking } = require('../lib/state'));
     ({ getLocalIp } = require('../lib/utils'));
     await new Promise((resolve) => server.listen(Number(process.env.PORT), '0.0.0.0', resolve));
     base = `http://127.0.0.1:${process.env.PORT}`;
@@ -382,4 +383,32 @@ test('a converted cast the TV rejects before playing is recast without conversio
     } finally {
         page.close();
     }
+});
+
+// --- Pages opened mid-stream ---
+
+test('a page opened mid-stream finds the session, and where playback is', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/vod.m3u8`, type: 'hls' });
+    startPlaying(receiver());
+
+    const list = await (await fetch(`${base}/api/sessions`)).json();
+    assert.deepStrictEqual(list.sessions.map(s => [s.ip, s.type]), [[MOCK_IP, 'chromecast']]);
+
+    const session = await (await fetch(`${base}/api/session/${MOCK_IP}`)).json();
+    assert.strictEqual(session.playback.status.playerState, 'PLAYING');
+    assert.ok(session.playback.status.media, 'the media (and its duration) is carried over');
+    assert.ok(Number.isFinite(session.playback.status.currentTime));
+    assert.ok(session.playback.statusAgeMs < 1000, 'asked the receiver just now');
+});
+
+test('a jump the TV makes on its own (its remote) is recognised as a seek', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/vod.m3u8`, type: 'hls' });
+    const mock = receiver();
+    startPlaying(mock);
+    assert.strictEqual(bufferHealthTracking.get(MOCK_IP).lastSeekAt, null);
+
+    mock.seek(600); // not through HomeCast
+    assert.ok(bufferHealthTracking.get(MOCK_IP).lastSeekAt > 0, 'the buffering that follows is expected');
 });

@@ -50,8 +50,8 @@ services:
       # Converted video gets 4x the source's bitrate (re-encoding needs more
       # bits than the original to keep its quality), up to this ceiling
       # - TRANSCODE_BITRATE=25M
-      # Simultaneous encodes (default 2)
-      # - TRANSCODE_CONCURRENCY=2
+      # Simultaneous encodes (default 1: most GPUs have one video engine)
+      # - TRANSCODE_CONCURRENCY=1
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/api/devices', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s

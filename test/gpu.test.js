@@ -33,6 +33,15 @@ test('GPU busy share comes from the idle (RC6) counter between two samples', (t)
     assert.deepStrictEqual(gpu.sample(), { busyPercent: 75, clockMhz: 2050, measures: 'gpu' });
 });
 
+test('an idle instant\'s zero clock gives way to the requested clock', (t) => {
+    const sys = fakeSysfs();
+    t.after(sys.cleanup);
+    sys.set(0, 0); // the actual clock reads 0 while the GPU is idle
+    fs.writeFileSync(path.join(sys.root, 'card1/gt/gt0/rps_cur_freq_mhz'), '2050\n');
+    const gpu = createGpuMonitor('/dev/dri/renderD129', { sysRoot: sys.root });
+    assert.strictEqual(gpu.sample().clockMhz, 2050);
+});
+
 test('the xe driver\'s counters are found too', (t) => {
     const sys = fakeSysfs({ idleFile: 'device/tile0/gt0/gtidle/idle_residency_ms', freqFile: 'device/tile0/gt0/freq0/act_freq' });
     t.after(sys.cleanup);

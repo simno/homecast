@@ -1,12 +1,12 @@
-// Entry point: wires the modules to the page and restores streams that
-// were playing when the page was last open.
+// Entry point: wires the modules to the page and restores the streams that
+// are playing — on the server, whichever browser started them.
 import { refreshGraphColors } from './graphs.js';
 import {
     videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay,
     helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
-import { fetchCsrfToken, checkSessionStatus } from './api.js';
+import { fetchCsrfToken, checkSessionStatus, fetchRunningSessions } from './api.js';
 import { redrawActiveGraphs, startDashboardTimers } from './dashboard.js';
 import {
     createStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
@@ -18,7 +18,7 @@ import {
 } from './compose.js';
 import { wirePairingControls, hidePinPrompt, isPinPromptOpen } from './pairing.js';
 import { wireSubtitleControls } from './subtitles.js';
-import { wirePlaybackControls } from './playback.js';
+import { wirePlaybackControls, applyPlayerStatus } from './playback.js';
 import { wireRecentControls } from './recent.js';
 import { connectWebSocket } from './websocket.js';
 
@@ -146,6 +146,19 @@ async function restoreStreams(savedState) {
         if (session.stats) stream.stats = session.stats;
         if (session.subtitles) stream.subtitles = session.subtitles;
         if (session.volume) stream.volume = session.volume;
+        if (session.bufferHealth) stream.bufferHealth = session.bufferHealth;
+        // Where playback is: receivers say only when it changes, so without
+        // this a page opened mid-stream has no position or timeline.
+        if (session.playback?.status) {
+            applyPlayerStatus(stream, session.playback.status, session.playback.ended);
+            if (stream.position) stream.position.at -= session.playback.statusAgeMs;
+            if (stream.liveRange) stream.liveRange.at -= session.playback.statusAgeMs;
+        }
+        const delay = session.tracking?.lastDelay;
+        if (delay > 0 && !stream.ended) {
+            stream.currentDelay = delay;
+            stream.hasDelay = true;
+        }
         anyActive = true;
     }
 
@@ -162,17 +175,28 @@ async function restoreStreams(savedState) {
     console.log('[State] Restored', ips.length, 'active stream(s)');
 }
 
-window.addEventListener('load', () => {
-    const savedState = loadState();
-    if (!savedState?.activeStreams?.length) return;
-
-    if (Date.now() - savedState.timestamp >= 24 * 60 * 60 * 1000) {
+// Streams to restore: what the server is playing, plus what this browser
+// remembers (its names and which one was on screen).
+async function streamsToRestore() {
+    let saved = loadState();
+    if (saved && Date.now() - saved.timestamp >= 24 * 60 * 60 * 1000) {
         console.log('[State] Saved state is too old, clearing');
         clearState();
-        return;
+        saved = null;
     }
+    const known = new Map((saved?.activeStreams || []).map(s => [s.ip, s]));
+    for (const { ip, type, deviceName } of await fetchRunningSessions()) {
+        if (!known.has(ip)) known.set(ip, { ip, deviceName, deviceType: type });
+    }
+    return known.size > 0 ? { activeStreams: [...known.values()], activeStreamIp: saved?.activeStreamIp } : null;
+}
+
+window.addEventListener('load', () => {
     // Wait a moment for the device list to arrive via WebSocket
-    setTimeout(() => restoreStreams(savedState), 1000);
+    setTimeout(async () => {
+        const toRestore = await streamsToRestore();
+        if (toRestore) restoreStreams(toRestore);
+    }, 1000);
 });
 
 // Initial device poll
