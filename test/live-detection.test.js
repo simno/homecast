@@ -1,7 +1,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('assert');
 const http = require('http');
-const { isLiveHlsStream } = require('../lib/extraction');
+const { isLiveHlsStream, describeHlsStream } = require('../lib/extraction');
 
 // A media playlist that is still growing: no #EXT-X-ENDLIST.
 const LIVE_MEDIA = [
@@ -68,6 +68,11 @@ test('#EXT-X-ENDLIST behind a master is not live', async () => {
 test('#EXT-X-PLAYLIST-TYPE:VOD is not live', async () => {
     mode = 'vod-type';
     assert.strictEqual(await isLiveHlsStream(`${base}/absolute-master.m3u8`), false);
+});
+
+test('a live stream reports its window length, where a cast starts it', async () => {
+    mode = 'live';
+    assert.deepStrictEqual(await describeHlsStream(`${base}/absolute-master.m3u8`), { live: true, windowSeconds: 8 });
 });
 
 test('relative variant URI is resolved against the master URL', async () => {

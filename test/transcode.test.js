@@ -34,6 +34,33 @@ function tfdts(mp4) {
     return out;
 }
 
+// The AAC AudioSpecificConfig in an init segment's esds box: the
+// DecoderSpecificInfo (tag 5) inside the DecoderConfigDescriptor (tag 4)
+// inside the ES_Descriptor (tag 3). Null if absent.
+function audioSpecificConfig(mp4) {
+    const at = mp4.indexOf('esds');
+    if (at === -1) return null;
+    const end = at - 4 + mp4.readUInt32BE(at - 4);
+    const find = (tag, start, stop) => {
+        for (let o = start; o < stop;) {
+            const t = mp4[o++];
+            let len = 0;
+            for (let i = 0; i < 4; i++) {
+                const b = mp4[o++];
+                len = (len << 7) | (b & 0x7f);
+                if (!(b & 0x80)) break;
+            }
+            if (t === tag) return { start: o, stop: o + len };
+            o += len;
+        }
+        return null;
+    };
+    const es = find(0x03, at + 8, end); // after the box's version/flags
+    const config = es && find(0x04, es.start + 3, es.stop); // ES_ID + flags
+    const info = config && find(0x05, config.start + 13, config.stop); // fixed fields
+    return info ? mp4.subarray(info.start, info.stop) : null;
+}
+
 // --- Helpers ---
 
 test('an fMP4 splits into its init section and media fragments', () => {
@@ -158,6 +185,8 @@ test('a 4K H.264 variant reaches the receiver as HEVC fMP4 on a continuous timel
     assert.strictEqual(init.res.headers.get('content-type'), 'video/mp4');
     assert.strictEqual(init.body.toString('latin1', 4, 8), 'ftyp');
     assert.ok(init.body.includes('hvc1'), 'declares HEVC');
+    // Without the AAC config in the init, Cast receivers fail the load.
+    assert.ok(audioSpecificConfig(init.body)?.length >= 2, 'init carries the AAC decoder config');
 
     const [first, second] = await Promise.all(segmentUrls.map(get));
     for (const seg of [first, second]) assert.strictEqual(seg.body.toString('latin1', 4, 8), 'moof');

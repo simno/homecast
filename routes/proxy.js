@@ -121,7 +121,7 @@ function planTranscode(m3u8, quality) {
     return 'media';
 }
 
-function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode) {
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true } = {}) {
     if (inFlightPlaylistFetches.has(cacheKey)) {
         return inFlightPlaylistFetches.get(cacheKey);
     }
@@ -171,12 +171,15 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
             });
         });
         if (plan === 'media') {
-            transcoder.noteVariant(url, segmentUrls);
+            // One #EXTINF per segment, in the same order as the URIs.
+            const durations = [...filteredM3u8.matchAll(/^#EXTINF:\s*([\d.]+)/gim)].map(m => parseFloat(m[1]));
+            transcoder.noteVariant(url, segmentUrls.map((u, i) => ({ url: u, duration: durations[i] || 0 })),
+                { live: isLive, fetchSegment: segmentFetcher(headers) });
             rewrittenM3u8 = transcoder.addInitMap(rewrittenM3u8,
                 buildProxyUrl(req.headers.host, { url, referer, quality, transcode: 'hevc', part: 'init' }));
         }
 
-        playlistCache.set(cacheKey, {
+        if (cache) playlistCache.set(cacheKey, {
             content: rewrittenM3u8,
             timestamp: Date.now(),
             isLive: isLive
@@ -842,4 +845,27 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
     }
 });
 
+// Start a converted cast's work before its receiver asks. The receiver spends
+// seconds launching, then fetches the master and variant playlists, and only
+// then does conversion begin (noteVariant). Fetching both playlists here, the
+// same URLs the receiver will request, starts converting the first segments
+// right away and leaves the variant playlist cached for it. The master isn't
+// cached: the receiver's own fetch of it records the stream's stats.
+async function warmConvertedPlaylists({ host, url, referer, quality }) {
+    const headers = { 'User-Agent': USER_AGENT };
+    if (referer) headers['Referer'] = referer;
+    const req = { headers: { host } };
+
+    if (!(await validateProxyUrl(url)).valid) return;
+    const top = await fetchAndRewritePlaylist(`${url}|q=${quality}|t=hevc`, url, quality, headers, req, referer, 'hevc', { cache: false });
+    // A media playlist given directly was noted (and started) just now.
+    const variant = top.ok && top.rewrittenM3u8.split('\n').find(l => l.startsWith('http') && l.includes('transcode=hevc'));
+    if (!variant) return;
+
+    const variantUrl = new URL(variant).searchParams.get('url');
+    if (!(await validateProxyUrl(variantUrl)).valid) return;
+    await fetchAndRewritePlaylist(`${variantUrl}|q=${quality}|t=hevc`, variantUrl, quality, headers, req, referer, 'hevc');
+}
+
 module.exports = router;
+module.exports.warmConvertedPlaylists = warmConvertedPlaylists;
