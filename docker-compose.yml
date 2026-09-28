@@ -13,14 +13,25 @@ services:
       # AirPlay pairing credentials; without this, Apple TVs must be
       # re-paired every time the container is re-created (e.g. on upgrade)
       - homecast-data:/app/data
-    # Optional: an Intel GPU (Arc, or an iGPU with Quick Sync) lets HomeCast
-    # convert 4K H.264 streams (X/Periscope broadcasts) to HEVC, which 4K
-    # Chromecasts can play. Uncomment both, and set group_add to the group
-    # that owns the render node on the host: stat -c %g /dev/dri/renderD128
+    # Optional: a GPU lets HomeCast convert 4K H.264 streams (X/Periscope
+    # broadcasts) to HEVC, which 4K Chromecasts can play (amd64 images).
+    #
+    # Intel (Arc, Quick Sync iGPUs) or AMD: pass the GPU through, and set
+    # group_add to the group that owns its render node on the host:
+    # stat -c %g /dev/dri/renderD128
     # devices:
     #   - /dev/dri:/dev/dri
     # group_add:
     #   - "992"
+    #
+    # NVIDIA: install the NVIDIA Container Toolkit on the host, then:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, video, utility]  # video: NVENC; utility: GPU load
     environment:
       - NODE_ENV=production
       - PORT=3000  # Change this to use a different port
@@ -33,8 +44,8 @@ services:
       # - CSRF_SECRET=your-random-secret-here
       # Optional: Set your machine's LAN IP if auto-detection fails
       # - HOST_IP=192.168.1.100
-      # Optional: 4K conversion for Chromecast (needs the GPU devices above).
-      # With several GPUs, name the render node to use (e.g. the Arc, not the iGPU)
+      # Optional: 4K conversion for Chromecast (needs a GPU passed through above).
+      # With several Intel/AMD GPUs, name the render node to use (e.g. the Arc, not the iGPU)
       # - TRANSCODE_DEVICE=/dev/dri/renderD129
       # Converted video gets 4x the source's bitrate (re-encoding needs more
       # bits than the original to keep its quality), up to this ceiling

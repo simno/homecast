@@ -134,25 +134,13 @@ function formatKbps(kbps) {
     return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} Kbps`;
 }
 
-// "vaapi (/dev/dri/renderD129, low-power)" -> "Intel/AMD GPU (VAAPI), renderD129"
-function encoderLabel(name) {
-    if (!name) return '';
-    if (name.startsWith('vaapi')) {
-        const node = /renderD\d+/.exec(name)?.[0];
-        return `GPU (VAAPI)${node ? `, ${node}` : ''}`;
-    }
-    if (name.startsWith('videotoolbox')) return 'Apple VideoToolbox';
-    if (name.startsWith('x265')) return 'Software (x265)';
-    return name;
-}
-
 // The conversion panel: only for streams converted to HEVC on the way through.
 function renderTranscode(t) {
     const p = transcodePanel;
     p.panel.classList.toggle('hidden', !t);
     if (!t) return;
 
-    p.encoder.textContent = encoderLabel(t.encoder);
+    p.encoder.textContent = t.encoder || '';
 
     const slow = t.speed !== null && t.speed < SPEED_WARNING;
     p.speedTile.classList.toggle('is-warning', slow);
@@ -169,8 +157,11 @@ function renderTranscode(t) {
     p.bitrateDetail.textContent = t.sourceKbps ? `from ${formatKbps(t.sourceKbps)} H.264` : '';
 
     if (t.gpu?.busyPercent !== null && t.gpu?.busyPercent !== undefined) {
-        p.gpu.textContent = `${t.gpu.busyPercent}% busy`;
-        p.gpuDetail.textContent = t.gpu.clockMhz ? `${Math.round(t.gpu.clockMhz)} MHz` : '';
+        // What the driver lets us read: the whole GPU (Intel), the graphics
+        // engine without the video engine (AMD), or the encoder (NVIDIA).
+        p.gpu.textContent = `${t.gpu.busyPercent}% ${t.gpu.measures === 'encoder' ? 'encoder' : 'busy'}`;
+        const clock = t.gpu.clockMhz ? `${Math.round(t.gpu.clockMhz)} MHz` : '';
+        p.gpuDetail.textContent = t.gpu.measures === 'graphics' ? ['graphics engine', clock].filter(Boolean).join(', ') : clock;
     } else {
         p.gpu.textContent = '–';
         p.gpuDetail.textContent = t.gpu ? 'Measuring…' : 'Load not readable on this system';

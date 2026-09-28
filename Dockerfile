@@ -17,17 +17,21 @@ RUN groupadd -g 1001 nodejs && \
 #                    stops before the headless-browser step
 ARG VARIANT=full
 
-# ffmpeg and Intel's VAAPI driver, for converting 4K H.264 variants to HEVC so
-# Chromecasts can play them (lib/transcode.js; needs /dev/dri passed through,
-# see docker-compose.yml). Intel GPUs only, so amd64 only: elsewhere the
-# feature simply stays off. TRANSCODE=none leaves it out (~170MB smaller).
-# The driver is in Debian's non-free component; the free build lacks encoders.
-ARG TRANSCODE=intel
+# FFmpeg for converting 4K H.264 variants to HEVC so Chromecasts can play them
+# (lib/transcode.js). Jellyfin's build: unlike Debian's it has NVENC for NVIDIA
+# as well as VAAPI, with Intel's and AMD's drivers bundled — one package for
+# any of the three, passed through per docker-compose.yml. amd64 only; the
+# feature stays off elsewhere. TRANSCODE=none leaves it out (~200MB smaller).
+# The repository key is fetched with Node (already here); apt reads .asc keys.
+ARG TRANSCODE=gpu
 ARG TARGETARCH
-RUN if [ "$TRANSCODE" = "intel" ] && [ "$TARGETARCH" = "amd64" ]; then \
-        sed -i 's/^Components: main.*/Components: main non-free/' /etc/apt/sources.list.d/debian.sources && \
-        apt-get update && \
-        apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-non-free && \
+ENV FFMPEG_PATH=/usr/lib/jellyfin-ffmpeg/ffmpeg
+RUN if [ "$TRANSCODE" != "none" ] && [ "$TARGETARCH" = "amd64" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+        node -e "fetch('https://repo.jellyfin.org/jellyfin_team.gpg.key').then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }).then(k => require('fs').writeFileSync('/usr/share/keyrings/jellyfin.asc', k))" && \
+        . /etc/os-release && \
+        echo "deb [signed-by=/usr/share/keyrings/jellyfin.asc] https://repo.jellyfin.org/debian $VERSION_CODENAME main" > /etc/apt/sources.list.d/jellyfin.list && \
+        apt-get update && apt-get install -y --no-install-recommends jellyfin-ffmpeg7 && \
         rm -rf /var/lib/apt/lists/*; \
     fi
 

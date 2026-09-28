@@ -42,9 +42,11 @@ sources from webpages and serves them to your devices in a compatible format.
 - 📺 **Twitch** — Live channels and VODs resolved to castable HLS
 - 💬 **Subtitles** — Picks up subtitles from the page and from HLS/DASH manifests, or casts a WebVTT/SRT file by URL; switch or turn them off while playing
 - 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast; Apple TV takes HLS and MP4)
-- 🎮 **Remote Control** — Pause, skip and set the volume from the dashboard (volume on Chromecast; Apple TV uses its remote)
-- 🕘 **Recent Casts** — Recently cast pages are one click away, and the last device is preselected
-- 🩺 **Stream Recovery** — Stalled streams restart automatically, with progress shown on the dashboard
+- 🎞️ **4K on Chromecast** — 4K H.264 streams (X/Periscope broadcasts) converted to HEVC on the fly with an Intel, AMD or NVIDIA GPU, so 4K Chromecasts and Cast TVs can play them. See [4K on Chromecast](#4k-on-chromecast-hevc-conversion)
+- 🔴 **Live Streams** — Start near the live edge, with a timeline to go back and a Go live button to catch up
+- 🎮 **Remote Control** — Pause, skip, seek on the timeline and set the volume from the dashboard (volume on Chromecast; Apple TV uses its remote)
+- 🕘 **Recent Casts** — Recently cast pages are one click away (remove any you don't want), and the last device is preselected
+- 🩺 **Stream Recovery** — Stalled streams restart automatically, with progress shown on the dashboard; a stream the TV can't play is stopped with the TV's reason instead of retried
 -  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
 - ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
@@ -65,14 +67,19 @@ sources from webpages and serves them to your devices in a compatible format.
 
 ### Choosing an image
 
-| Tag      | Download | Includes                                                                                   |
-|----------|----------|--------------------------------------------------------------------------------------------|
-| `latest` | ~330MB   | Everything, including the headless browser that finds streams on JavaScript-only players   |
-| `lite`   | ~90MB    | Everything except the headless browser                                                     |
+| Tag      | Download (amd64 / arm64) | Includes                                                                    |
+|----------|--------------------------|-----------------------------------------------------------------------------|
+| `latest` | ~420MB / ~330MB          | Everything, including the headless browser that finds streams on JavaScript-only players |
+| `lite`   | ~180MB / ~90MB           | Everything except the headless browser                                      |
 
 Direct stream links, HLS/DASH, Twitch and ordinary embedded players work the same in both. Pick `latest` unless size
 matters: some sites only reveal their stream once the page's JavaScript runs, and `lite` can't find those (Analyze
 tells you when this may be the case). Versioned tags follow the same pattern: `1.2.3` and `1.2.3-lite`.
+
+The amd64 images include FFmpeg for [4K conversion](#4k-on-chromecast-hevc-conversion) (about 90MB of each
+download): [Jellyfin's build](https://github.com/jellyfin/jellyfin-ffmpeg), which has the encoders for Intel, AMD and
+NVIDIA GPUs and bundles the Intel and AMD drivers. arm64 images leave it out. To build an amd64 image without it, see
+[Build from Source](#build-from-source).
 
 ### Docker (GitHub Container Registry)
 
@@ -110,6 +117,21 @@ services:
       - PORT=3000
       # Optional: Set your machine's LAN IP if auto-detection fails
       # - HOST_IP=192.168.1.100
+    # Optional: a GPU for 4K conversion (see "4K on Chromecast").
+    # Intel or AMD — group_add: the group that owns the render node on the
+    # host, from: stat -c %g /dev/dri/renderD128
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "992"
+    # NVIDIA — with the NVIDIA Container Toolkit installed on the host:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, video, utility]
 
 volumes:
   homecast-data:
@@ -140,6 +162,8 @@ docker build -t homecast:local .                                # full
 # docker build --build-arg VARIANT=lite -t homecast:local .    # lite
 docker run -d --name homecast --network host -v homecast-data:/app/data homecast:local
 ```
+
+Add `--build-arg TRANSCODE=none` to leave out FFmpeg (no 4K conversion, ~90MB smaller).
 
 ### Node.js
 
@@ -178,6 +202,11 @@ To configure your Apple TV's AirPlay security:
 
 All modes are supported by HomeCast.
 
+**TVs with AirPlay 2 built in** (LG, Samsung and others) aren't offered as AirPlay targets: they play video only over
+AirPlay 2's encrypted sessions, not the AirPlay 1 video that HomeCast sends. Most have Chromecast built in as well and
+show up as a Cast device, which is the better route anyway (remote control and 4K conversion). The server log says
+why each is skipped (`no AirPlay 1 video`).
+
 ### Supported Sources
 
 - Direct videos: MP4, WebM
@@ -189,7 +218,10 @@ Sites with handling of their own in the code:
 
 - **Twitch** — live channels and VODs, resolved through Twitch's API
 - **X / Periscope broadcasts** — live and replays: replays are told apart from live streams, and the CDN's rejection of
-  a Referer is remembered per host
+  a Referer is remembered per host. Their 4K version is H.264, which Chromecasts can only play
+  [converted](#4k-on-chromecast-hevc-conversion)
+- **SpaceX launch pages** (`spacex.com/launches/...`) — the launch webcast is looked up in SpaceX's mission data; X
+  broadcasts play, YouTube webcasts can't be cast (see [Limitations](#limitations))
 
 This is what the code handles specifically, not a list of tested sites. If a site works (or doesn't), an issue saying
 so is welcome.
@@ -210,6 +242,58 @@ After Analyze, a **Subtitles** picker lists what was found with the video:
 Subtitle files are always fetched through HomeCast (even with Proxy stream off), because receivers only accept them
 with CORS headers. SRT is converted to WebVTT on the way, and the last language you picked becomes the default for
 the next video.
+
+### 4K on Chromecast (HEVC conversion)
+
+Chromecasts and Cast TVs decode 4K only as HEVC, VP9 or AV1, but some sources — X/Periscope broadcasts among them —
+offer 4K only as H.264. A Chromecast accepts such a stream, plays a couple of seconds and stops. With a GPU that
+encodes HEVC, HomeCast converts these streams as it proxies them, segment by segment, so 4K Chromecasts can play them.
+
+**What you need**
+
+- A GPU that encodes HEVC in hardware, passed through to the container (see the compose example above), on an amd64
+  image (it includes FFmpeg):
+
+  | GPU | Encoder | Passing it through |
+  |-----|---------|--------------------|
+  | **Intel** — Arc, or an iGPU with Quick Sync (6th gen / Skylake or newer) | VAAPI | `devices: /dev/dri:/dev/dri`, and `group_add` with the group that owns the render node (`stat -c %g /dev/dri/renderD128`) |
+  | **AMD** — Radeon RX 400 series (Polaris) or newer, and Ryzen APUs with Radeon graphics | VAAPI | Same as Intel |
+  | **NVIDIA** — GeForce GTX 950 (second-generation Maxwell) or newer, with a recent driver | NVENC | The [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host, and the GPU reserved with `capabilities: [gpu, video, utility]` |
+
+- With more than one Intel or AMD GPU (e.g. an Arc next to an iGPU), `TRANSCODE_DEVICE` naming the one to use
+  (`renderD129`)
+
+Running HomeCast directly on a Mac (not in Docker) uses Apple's VideoToolbox instead, with the Mac's own FFmpeg.
+
+At startup the log says whether it worked, e.g. `[Transcode] HEVC conversion available via Intel GPU (VAAPI),
+renderD129`, or why not (no GPU passed through, no permission to use it, no encoder).
+
+> [!NOTE]
+> Conversion was developed and tested on an Intel Arc GPU and on a Mac. AMD and NVIDIA use the same pipeline with
+> their own encoders, but haven't been tested on real hardware yet — reports welcome.
+
+**Using it**
+
+When conversion is available, a Chromecast's quality picker offers the 4K version as *converted*, and **Highest
+available** picks it. There's no way to ask a Cast device whether it can decode 4K HEVC, so the cast itself is the
+test: a device that rejects the converted stream before it plays is recast automatically at the best quality it plays
+directly, and this browser stops choosing conversion for it. Apple TVs play 4K H.264 themselves and are never
+converted.
+
+The dashboard shows a **Converting to HEVC** panel for converted streams: how many times real time the conversion
+runs (it has to stay above 1), segments ready ahead of the TV, the converted and source bitrates, and GPU load and
+clock. What the load measures depends on what the driver makes readable: the whole GPU on Intel, the encoder itself on
+NVIDIA (from `nvidia-smi`), and the graphics engine on AMD, which leaves out the video engine that does the encoding,
+so it reads low.
+
+**Quality.** Re-encoding an already-compressed stream needs more bits than the original to keep its quality, so each
+segment is encoded at 4× its source bitrate, up to `TRANSCODE_BITRATE` (25 Mbps). Measured on a 5.5 Mbps 4K
+broadcast (VMAF against the source), that scores about 94, against 85 for the 1080p version the TV would otherwise
+upscale. On a home network the extra bandwidth doesn't matter.
+
+**Limits.** Only unencrypted MPEG-TS HLS segments can be converted (that's what these broadcasts use); anything else
+plays as it is. Starting takes a few seconds, since the TV waits for about 10 seconds of converted video before it
+plays.
 
 ### How stream detection works
 
@@ -233,6 +317,8 @@ Every candidate is then checked: dead links are dropped, HLS masters report thei
 - **MJPEG webcam streams** — Not supported by Chromecast protocol (requires transcoding)
 - **DRM-protected DASH** — Streams with `ContentProtection` are listed but can't be cast
 - **DASH on Apple TV** — AirPlay only plays HLS and MP4; cast DASH streams to a Chromecast
+- **AirPlay 2-only TVs** — LG, Samsung and other TVs with AirPlay 2 built in; cast to them over Chromecast instead
+- **4K H.264 on Chromecast without a supported GPU** — plays at 1080p (see [4K on Chromecast](#4k-on-chromecast-hevc-conversion))
 
 For these services, use their official apps or browser extensions.
 
@@ -257,6 +343,10 @@ For these services, use their official apps or browser extensions.
 | `DISABLE_SSRF_PROTECTION`    | `false`        | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
 | `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected  | Path to Playwright browser binaries                                                          |
 | `AIRPLAY_PAIRING_STORE`      | `./data/airplay-pairings.json` | Path to AirPlay pairing data file                                           |
+| `TRANSCODE_DEVICE`           | Auto (tries each `/dev/dri/renderD*`) | GPU for 4K conversion, e.g. `renderD129` or `/dev/dri/renderD129` |
+| `TRANSCODE_ENCODER`          | `auto`         | `auto`, `vaapi` (Intel, AMD), `nvenc` (NVIDIA), `videotoolbox` (Mac), `x265` (software, too slow for 4K; for testing) or `off` |
+| `TRANSCODE_BITRATE`          | `25M`          | Most a converted segment gets (each gets 4× its source bitrate up to this)   |
+| `TRANSCODE_CONCURRENCY`      | `2`            | Segments encoded at once                                                     |
 
 #### Advanced tuning
 
@@ -345,9 +435,33 @@ Ensure these ports are open:
 
 ### Video Won't Play
 
+- If the TV gives up on a stream, the dashboard says why (e.g. *The TV could not decode this stream*); try a lower
+  quality
 - Enable "Proxy stream" (under Advanced)
-- Check server logs for errors
+- Check server logs for errors: `[Cast] Receiver reported …` is the TV's own error
 - Verify the source URL is still valid
+
+### 4K Conversion Not Offered
+
+The quality picker only offers converted 4K when the server found a working encoder. Check the startup log:
+
+```bash
+docker logs homecast | grep Transcode
+```
+
+- `does not exist — is /dev/dri passed through` — add `devices: /dev/dri:/dev/dri`
+- `No permission to use /dev/dri/renderD…` — add the render node's group with `group_add` (`stat -c %g /dev/dri/renderD128`)
+- `ffmpeg not found` — you're on an arm64 image or one built with `TRANSCODE=none`
+- `vaapi (…) unusable` — the GPU doesn't encode HEVC through VAAPI, or the host driver is too old for it
+- `nvenc unusable` — the container can't reach the NVIDIA driver: check the NVIDIA Container Toolkit is installed
+  and the GPU is reserved with the `video` capability
+- `No hardware HEVC encoder`, with an NVIDIA GPU — the GPU isn't reserved for the container at all (no
+  `/dev/nvidiactl` inside it)
+- With several Intel/AMD GPUs, set `TRANSCODE_DEVICE` to the right one (`ls -l /dev/dri/by-path` shows which render
+  node belongs to which PCI slot)
+
+If conversion runs but the dashboard's **Speed** stays near or below 1×, the GPU can't keep up: lower
+`TRANSCODE_CONCURRENCY`, or check nothing else is using it.
 
 ## How It Works
 
@@ -359,6 +473,7 @@ Ensure these ports are open:
                  │ • Extract URL         │
                  │ • Rewrite HLS         │
                  │ • Proxy Stream        │
+                 │ • Convert 4K to HEVC  │
                  │ • AirPlay Pairing     │
                  │ • Wake-on-LAN         │
                  │ • Smart Cache         │
@@ -370,6 +485,7 @@ HomeCast acts as a bridge between web content and your devices, handling:
 - URL extraction from webpages
 - HLS playlist rewriting for compatibility
 - Stream proxying with adaptive caching
+- 4K H.264 to HEVC conversion for Chromecasts, on an Intel, AMD or NVIDIA GPU
 - AirPlay protocol for Apple TV (discovery, PIN pairing, casting)
 - Chromecast protocol via castv2
 - Wake-on-LAN for sleeping devices
@@ -379,11 +495,15 @@ HomeCast acts as a bridge between web content and your devices, handling:
 ## Technical Details
 
 - **Backend**: Node.js 26+, Express 5
-- **Protocols**: Cast v2, AirPlay 1 (port 7000), mDNS (discovery), HLS
+- **Protocols**: Cast v2, AirPlay 1 (port 7000), mDNS (discovery, via multicast-dns), HLS, DASH
 - **AirPlay**: SRP-6a PIN pairing (2048-bit), Curve25519 + Ed25519 pair-verify
+- **4K conversion**: FFmpeg (Jellyfin's build) with VAAPI for Intel and AMD or NVENC for NVIDIA, decoding and
+  encoding on the GPU, one process per HLS segment; fragmented MP4
+  output that keeps the source timestamps, so independently converted segments join seamlessly
 - **Caching**: Adaptive (4s for live, 60s for VOD)
 - **Performance**: Connection pooling, DNS caching, 256KB buffers
-- **Image**: Debian slim (`node:26-slim`); the full image adds Playwright's headless Chromium
+- **Image**: Debian slim (`node:26-slim`); the full image adds Playwright's headless Chromium, and amd64 images add
+  Jellyfin's FFmpeg
 
 ## Development
 
@@ -462,4 +582,5 @@ This automatically triggers the Docker workflow to build and publish the new ver
 Built with:
 
 - [castv2-client](https://github.com/thibauts/node-castv2-client) — Chromecast protocol
-- [mdns-js](https://github.com/mdns-js/node-mdns-js) — Device discovery
+- [multicast-dns](https://github.com/mafintosh/multicast-dns) — Device discovery
+- [FFmpeg](https://ffmpeg.org), in [Jellyfin's build](https://github.com/jellyfin/jellyfin-ffmpeg) — 4K conversion
