@@ -47,7 +47,7 @@ sources from webpages and serves them to your devices in a compatible format.
 - 🎮 **Remote Control** — Pause, skip, seek on the timeline and set the volume from the dashboard (volume on Chromecast; Apple TV uses its remote)
 - 🕘 **Recent Casts** — Recently cast pages are one click away (remove any you don't want), and the last device is preselected
 - 🩺 **Stream Recovery** — Stalled streams restart automatically, with progress shown on the dashboard; a stream the TV can't play is stopped with the TV's reason instead of retried
--  **AirPlay Casting** — Stream directly to Apple TV over the AirPlay protocol
+- 📡 **AirPlay Casting** — Stream to Apple TVs over AirPlay (not TVs with AirPlay 2 built in; see [AirPlay & Apple TV](#airplay--apple-tv))
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
 - ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
 - 🔒 **SSRF Protection** — Blocks access to private IPs and localhost
@@ -189,8 +189,8 @@ node server.js
 
 ### AirPlay & Apple TV
 
-HomeCast discovers Apple TV devices automatically alongside Chromecast devices. Apple TV devices are marked with an
- icon in the device list.
+HomeCast discovers Apple TV devices automatically alongside Chromecast devices. Apple TV devices are marked
+**· AirPlay** in the device list.
 
 **If your Apple TV requires a PIN code** (default setting), HomeCast will prompt you to enter the on-screen code the
 first time you cast. After pairing, the credentials are stored and reused automatically.
@@ -314,7 +314,8 @@ Every candidate is then checked: dead links are dropped, HLS masters report thei
 - **YouTube** — Protected by multiple DRM and anti-scraping measures
 - **Netflix, Disney+, Hulu** — DRM-protected content
 - **Complex streaming platforms** — Sites with encrypted manifests or authentication
-- **MJPEG webcam streams** — Not supported by Chromecast protocol (requires transcoding)
+- **MJPEG webcam streams** — Chromecasts can't play them, and HomeCast's [conversion](#4k-on-chromecast-hevc-conversion)
+  only covers 4K HLS streams, not continuous MJPEG
 - **DRM-protected DASH** — Streams with `ContentProtection` are listed but can't be cast
 - **DASH on Apple TV** — AirPlay only plays HLS and MP4; cast DASH streams to a Chromecast
 - **AirPlay 2-only TVs** — LG, Samsung and other TVs with AirPlay 2 built in; cast to them over Chromecast instead

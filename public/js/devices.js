@@ -65,8 +65,9 @@ export function updateDeviceList(devices) {
             const opt = document.createElement('option');
             opt.value = d.ip;
             opt.dataset.type = d.type || 'chromecast';
-            const typeIcon = d.type === 'airplay' ? ' ' : '';
-            opt.innerText = `${d.name} (${d.ip})${typeIcon}`;
+            // Text, not an icon: the Apple logo glyph only exists in Apple's fonts.
+            const typeLabel = d.type === 'airplay' ? ' · AirPlay' : '';
+            opt.innerText = `${d.name} (${d.ip})${typeLabel}`;
             deviceSelect.appendChild(opt);
         });
     }
