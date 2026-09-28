@@ -29,6 +29,7 @@ const {
     isReceiverDecodable
 } = require('../lib/proxy');
 const transcoder = require('../lib/transcode');
+const { fixSegmentTiming } = require('../lib/h264-timing');
 const { getBufferHealthStats } = require('../lib/stats');
 const { rewriteMpd, describeMpd, dashSegmentUrl, upstreamFromDashPath } = require('../lib/dash');
 const { toWebVtt } = require('../lib/subtitles');
@@ -121,7 +122,7 @@ function planTranscode(m3u8, quality) {
     return 'media';
 }
 
-function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true } = {}) {
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true, device } = {}) {
     if (inFlightPlaylistFetches.has(cacheKey)) {
         return inFlightPlaylistFetches.get(cacheKey);
     }
@@ -149,7 +150,8 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
 
         const originalM3u8 = Buffer.concat(chunks).toString('utf8');
         const baseUrl = new URL(url);
-        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode });
+        // An LG TV decodes 4K H.264 itself: nothing needs filtering out for it.
+        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode || device === 'webos' });
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
         const plan = transcode ? planTranscode(filteredM3u8, quality) : null;
         if (plan === 'master') filteredM3u8 = transcoder.declareHevc(filteredM3u8);
@@ -167,7 +169,8 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
                 referer,
                 quality,
                 type: isPlaylist ? 'hls' : undefined,
-                transcode: plan && !isTagUri ? 'hevc' : undefined
+                transcode: plan && !isTagUri ? 'hevc' : undefined,
+                device
             });
         });
         if (plan === 'media') {
@@ -273,6 +276,39 @@ function trackClient(clientIp) {
     return { deviceIp, stats };
 }
 
+// Log a finished segment and send the page the device's updated stats.
+function noteSegmentDone({ deviceIp, stats, url, bytes, segmentSkipped }) {
+    const segmentName = url.substring(url.lastIndexOf('/') + 1, url.lastIndexOf('?') > 0 ? url.lastIndexOf('?') : undefined);
+    console.log(`[Proxy] Segment completed: ${segmentName} (${bytes} bytes)${segmentSkipped ? ' [SKIPPED AHEAD]' : ''}`);
+
+    const duration = (Date.now() - stats.startTime) / 1000;
+    const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0;
+
+    let currentDelay = 0;
+    const tracking = playbackTracking.get(deviceIp);
+    if (tracking && tracking.lastDelay !== undefined) {
+        currentDelay = tracking.lastDelay;
+    }
+
+    broadcast({
+        type: 'streamStats',
+        deviceIp: deviceIp,
+        bufferHealth: getBufferHealthStats(deviceIp),
+        stats: {
+            totalBytes: stats.totalBytes,
+            totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
+            transferRate: transferRate,
+            duration: Math.round(duration),
+            resolution: stats.resolution,
+            bitrate: stats.bitrate,
+            segmentCount: stats.segmentCount,
+            cacheHits: stats.cacheHits,
+            delay: currentDelay,
+            frameRate: stats.frameRate
+        }
+    });
+}
+
 // Stream an upstream response to the receiver, forwarding its status (206
 // for ranges) and headers, and counting the bytes toward the device's stats.
 function pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped = false }) {
@@ -322,40 +358,40 @@ function pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segment
         if (!res.headersSent) res.status(500).end();
     });
 
-    response.data.on('end', () => {
-        const segmentName = currentUrl.substring(currentUrl.lastIndexOf('/') + 1, currentUrl.lastIndexOf('?') > 0 ? currentUrl.lastIndexOf('?') : undefined);
-        console.log(`[Proxy] Segment completed: ${segmentName} (${segmentBytes} bytes)${segmentSkipped ? ' [SKIPPED AHEAD]' : ''}`);
-
-        const duration = (Date.now() - stats.startTime) / 1000;
-        const transferRate = duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0;
-
-        let currentDelay = 0;
-        const tracking = playbackTracking.get(deviceIp);
-        if (tracking && tracking.lastDelay !== undefined) {
-            currentDelay = tracking.lastDelay;
-        }
-
-        broadcast({
-            type: 'streamStats',
-            deviceIp: deviceIp,
-            bufferHealth: getBufferHealthStats(deviceIp),
-            stats: {
-                totalBytes: stats.totalBytes,
-                totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
-                transferRate: transferRate,
-                duration: Math.round(duration),
-                resolution: stats.resolution,
-                bitrate: stats.bitrate,
-                segmentCount: stats.segmentCount,
-                cacheHits: stats.cacheHits,
-                delay: currentDelay,
-                frameRate: stats.frameRate
-            }
-        });
-    });
+    response.data.on('end', () => noteSegmentDone({ deviceIp, stats, url: currentUrl, bytes: segmentBytes, segmentSkipped }));
 
     // Performance: Stream with larger chunks for better throughput
     response.data.pipe(res, { highWaterMark: 256 * 1024 });
+}
+
+// Only TS segments carry the header lib/h264-timing.js corrects, and they're
+// small enough to hold whole (a direct MP4 file is neither).
+const MAX_TIMED_SEGMENT_BYTES = 64 * 1024 * 1024;
+function isTsSegment(url, response) {
+    const length = parseInt(response.headers['content-length'] || '0', 10);
+    if (length > MAX_TIMED_SEGMENT_BYTES) return false;
+    if (/mp2t/i.test(response.headers['content-type'] || '')) return true;
+    try {
+        return /\.ts$/i.test(new URL(url).pathname);
+    } catch {
+        return false;
+    }
+}
+
+// A segment for an LG TV: read whole, its frame-rate header corrected when
+// the source declares a wrong one (lib/h264-timing.js), then sent.
+async function serveTimedSegment(res, response, { deviceIp, stats, url, segmentSkipped }) {
+    const chunks = [];
+    for await (const chunk of response.data) chunks.push(chunk);
+    const body = await fixSegmentTiming(Buffer.concat(chunks));
+
+    stats.segmentCount++;
+    stats.totalBytes += body.length;
+    res.status(response.status);
+    res.set('Content-Type', response.headers['content-type'] || 'video/mp2t');
+    res.header('Access-Control-Allow-Origin', '*');
+    res.send(body);
+    noteSegmentDone({ deviceIp, stats, url, bytes: body.length, segmentSkipped });
 }
 
 // Fetch an MPD and hand the receiver a copy whose every URL points back at us.
@@ -630,6 +666,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         }
 
         const transcode = req.query.transcode === 'hevc' && transcoder.isAvailable() ? 'hevc' : undefined;
+        const device = req.query.device === 'webos' ? 'webos' : undefined;
         if (transcode && req.query.part === 'init') {
             return await serveConvertedInit(res, { url, headers });
         }
@@ -645,7 +682,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         if (isPlaylist) {
             // Quality is part of the key: the same upstream master URL yields
             // different rewritten playlists per requested quality.
-            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}`;
+            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}`;
             const cached = playlistCache.get(cacheKey);
 
             const cacheTTL = cached?.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
@@ -666,7 +703,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode);
+            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { device });
 
             if (!result.ok) {
                 console.error(`[Proxy] Upstream returned ${result.status} for ${url}`);
@@ -841,6 +878,9 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             }
         }
 
+        if (device === 'webos' && isTsSegment(currentUrl, response) && !req.headers.range) {
+            return await serveTimedSegment(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
+        }
         pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
 
     } catch (e) {

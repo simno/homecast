@@ -1,7 +1,8 @@
 const express = require('express');
-const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, devices } = require('../lib/state');
+const { activeSessions, activeAirPlaySessions, activeWebOsSessions, streamStats, playbackTracking, devices } = require('../lib/state');
 const { castToDevice, stopCasting, controlPlayback, sessionPlayback } = require('../lib/cast');
 const { castToAirPlayDevice, stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
+const { castToWebOsDevice, stopWebOsCasting, controlWebOsPlayback, webOsVolume } = require('../lib/webos');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
 const { isAvailable: isTranscodeAvailable } = require('../lib/transcode');
 const { getBufferHealthStats } = require('../lib/stats');
@@ -87,6 +88,14 @@ router.post('/api/cast', (req, res) => {
         return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
     }
 
+    // LG TVs play in their own browser, which has no DASH player of its own.
+    if (deviceType === 'webos' || devices.get(ip)?.type === 'webos') {
+        if (type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url))) {
+            return res.status(400).json({ error: 'LG TVs cannot play DASH streams this way. Cast this one to a Chromecast, or pick an HLS or MP4 stream.' });
+        }
+        return castToWebOsDevice(ip, url, referer || '', quality, res, type, subtitle);
+    }
+
     // Convert a variant the Chromecast can't decode to HEVC as it's proxied
     // (lib/transcode.js); needs the proxy and a working hardware encoder.
     const transcode = req.body.transcode === true && !!proxy && isTranscodeAvailable();
@@ -99,7 +108,8 @@ router.post('/api/cast', (req, res) => {
 router.get('/api/sessions', (req, res) => {
     const sessions = [
         ...[...activeSessions.keys()].map(ip => ({ ip, type: 'chromecast' })),
-        ...[...activeAirPlaySessions.keys()].map(ip => ({ ip, type: 'airplay' }))
+        ...[...activeAirPlaySessions.keys()].map(ip => ({ ip, type: 'airplay' })),
+        ...[...activeWebOsSessions.keys()].map(ip => ({ ip, type: 'webos' }))
     ].map(s => ({ ...s, deviceName: devices.get(s.ip)?.name || s.ip }));
     res.json({ sessions });
 });
@@ -141,6 +151,17 @@ router.get('/api/session/:ip', async (req, res) => {
         });
     }
 
+    const webOsSession = activeWebOsSessions.get(ip);
+    if (webOsSession) {
+        return res.json({
+            active: true,
+            type: 'webos',
+            stats: streamStats.get(ip) || null,
+            startTime: webOsSession.startTime,
+            volume: await webOsVolume(ip)
+        });
+    }
+
     res.json({ active: false });
 });
 
@@ -164,6 +185,11 @@ router.post('/api/stop', async (req, res) => {
         }
     }
 
+    if (activeWebOsSessions.has(ip)) {
+        await stopWebOsCasting(ip);
+        return res.json({ status: 'stopped' });
+    }
+
     // Check Chromecast sessions
     const session = activeSessions.get(ip);
     if (!session) {
@@ -181,8 +207,8 @@ router.post('/api/stop', async (req, res) => {
 
 // --- API: Playback Control ---
 // action: 'pause' | 'play' | 'seek' (value: seconds to skip, -3600..3600)
-// | 'seekTo' (value: position in seconds) | 'live' (jump to the live edge, Chromecast only)
-// | 'volume' (value: 0-1, Chromecast only) | 'mute' (value: boolean, Chromecast only)
+// | 'seekTo' (value: position in seconds) | 'live' (jump to the live edge; not Apple TV)
+// | 'volume' (value: 0-1; not Apple TV) | 'mute' (value: boolean; not Apple TV)
 function validPlaybackValue(action, value) {
     if (action === 'pause' || action === 'play' || action === 'live') return true;
     if (action === 'seek') return Number.isFinite(value) && Math.abs(value) <= 3600;
@@ -204,7 +230,8 @@ router.post('/api/playback', async (req, res) => {
     }
 
     const airplay = activeAirPlaySessions.has(ip);
-    if (!airplay && !activeSessions.has(ip)) {
+    const webos = activeWebOsSessions.has(ip);
+    if (!airplay && !webos && !activeSessions.has(ip)) {
         return res.status(404).json({ error: 'No active session found for this device' });
     }
     if (airplay && (action === 'volume' || action === 'mute')) {
@@ -215,9 +242,9 @@ router.post('/api/playback', async (req, res) => {
     }
 
     try {
-        const result = airplay
-            ? await controlAirPlayPlayback(ip, action, value)
-            : await controlPlayback(ip, action, value);
+        const result = airplay ? await controlAirPlayPlayback(ip, action, value)
+            : webos ? await controlWebOsPlayback(ip, action, value)
+                : await controlPlayback(ip, action, value);
         res.json(result);
     } catch (err) {
         console.error(`[Playback] ${action} failed on ${ip}:`, err.message);
@@ -234,6 +261,9 @@ router.post('/api/subtitles', async (req, res) => {
     }
     if (activeAirPlaySessions.has(ip)) {
         return res.status(400).json({ error: 'Choose subtitles on the Apple TV itself' });
+    }
+    if (activeWebOsSessions.has(ip)) {
+        return res.status(400).json({ error: 'Subtitles on an LG TV are chosen when casting' });
     }
     if (!activeSessions.has(ip)) {
         return res.status(404).json({ error: 'No active session found for this device' });

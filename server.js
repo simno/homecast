@@ -7,6 +7,7 @@ const { doubleCsrf } = require('csrf-csrf');
 const { createWebSocketServer } = require('./lib/websocket');
 const { initDiscovery } = require('./lib/discovery');
 const { initAirPlayDiscovery, startAirPlayHealthMonitoring } = require('./lib/airplay');
+const { initWebOsDiscovery, initKeyStore: initWebOsKeyStore, handlePlayerMessage } = require('./lib/webos');
 const { startHealthMonitoring } = require('./lib/health');
 const { startStallDetection } = require('./lib/recovery');
 const { getLocalIp, PORT, STALE_DEVICE_TIMEOUT_MS } = require('./lib/utils');
@@ -59,6 +60,17 @@ wss.on('connection', (ws, req) => {
             return;
         }
     }
+    // Pages only listen, except HomeCast's player page on an LG TV, which
+    // reports playback (lib/webos.js).
+    ws.on('message', (data) => {
+        let msg;
+        try {
+            msg = JSON.parse(data);
+        } catch {
+            return;
+        }
+        if (msg?.type === 'webosPlayer' && typeof msg.session === 'string') handlePlayerMessage(ws, msg);
+    });
 });
 
 // Security: Helmet.js headers
@@ -173,11 +185,15 @@ process.on('uncaughtException', (err) => {
 if (require.main === module) {
     initDiscovery();
     initAirPlayDiscovery();
+    initWebOsDiscovery();
     startHealthMonitoring();
     startAirPlayHealthMonitoring();
     startStallDetection();
     require('./lib/airplay-pairing-store').initPairingStore().catch(err => {
         console.error('[AirPlay-Pairing] Failed to init pairing store:', err);
+    });
+    initWebOsKeyStore().catch(err => {
+        console.error('[webOS] Failed to load TV keys:', err);
     });
     // Probe for a hardware HEVC encoder (4K conversion for Chromecast).
     require('./lib/transcode').detect().catch(err => {

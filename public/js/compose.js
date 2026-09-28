@@ -11,7 +11,7 @@ import { apiPost } from './api.js';
 import { updateStatus } from './status.js';
 import { createStreamEntry, renderStreamBar, setMode } from './streams.js';
 import {
-    findDeviceName, filterDeviceDropdown, selectedDeviceIp, selectedDeviceType, showManualIpHint
+    findDeviceName, filterDeviceDropdown, selectedDeviceIp, selectedDeviceKey, selectedDeviceType, showManualIpHint
 } from './devices.js';
 import { showPinPrompt } from './pairing.js';
 import {
@@ -332,7 +332,8 @@ function populateQualityOptions(video, { keep = false } = {}) {
         qualitySelect.appendChild(opt);
     };
 
-    const isChromecast = selectedDeviceType() !== 'airplay';
+    // Apple TVs and LG TVs (webOS) decode every variant as it is.
+    const isChromecast = selectedDeviceType() === 'chromecast';
     const topConvertible = isChromecast && !cannotPlayConverted(selectedDeviceIp())
         ? (video.qualities || []).find(q => q.convertible)
         : null;
@@ -355,7 +356,7 @@ function populateQualityOptions(video, { keep = false } = {}) {
 // the same params to /api/cast and handle the same needsPairing/error/success
 // shapes, so a fix to one path can't silently miss the other.
 // `page`: the URL and title the user analysed, remembered as a recent cast.
-async function performCast(params, { loadingMessage, allowPairingRetry, page }) {
+async function performCast(params, { loadingMessage, allowPairingRetry, page, deviceKey }) {
     castBtn.disabled = true;
     setCastButton({ busy: true });
     updateStatus(loadingMessage, 'loading');
@@ -366,7 +367,7 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page }) 
 
         if (data.needsPairing && allowPairingRetry) {
             showPinPrompt(data.deviceIp, data.deviceName, () => {
-                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false, page });
+                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false, page, deviceKey });
             });
             castBtn.disabled = false;
             setCastButton({ busy: false });
@@ -378,10 +379,12 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page }) 
         }
 
         rememberSubtitleChoice(params.subtitle);
-        rememberDevice(params.ip);
+        rememberDevice(deviceKey || params.ip);
         if (page?.url) addRecent(page.url, page.title);
-        // A manually entered IP may still be a discovered device of known type.
-        const deviceType = state.devices.find(d => d.ip === params.ip)?.type || params.deviceType;
+        // A manually entered IP may still be a discovered device of known type;
+        // an LG TV cast to through its browser shares its IP with its Cast receiver.
+        const deviceType = params.deviceType === 'webos' ? 'webos'
+            : state.devices.find(d => d.ip === params.ip)?.type || params.deviceType;
         createStreamEntry(params.ip, findDeviceName(params.ip), deviceType);
         if (data.subtitles) state.streams.get(params.ip).subtitles = data.subtitles;
         state.activeStreamIp = params.ip;
@@ -422,6 +425,7 @@ export async function startCasting() {
     }, {
         loadingMessage: 'Connecting to device...',
         allowPairingRetry: true,
-        page: { url: videoUrlInput.value.trim(), title: state.compose.title }
+        page: { url: videoUrlInput.value.trim(), title: state.compose.title },
+        deviceKey: selectedDeviceKey()
     });
 }

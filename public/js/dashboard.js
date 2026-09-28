@@ -55,7 +55,7 @@ export function renderDashboard() {
     const stream = state.streams.get(state.activeStreamIp);
     if (!stream) return;
 
-    const typeLabel = stream.deviceType === 'airplay' ? ' (Apple TV)' : '';
+    const typeLabel = { airplay: ' (Apple TV)', webos: ' (LG webOS)' }[stream.deviceType] || '';
     dashboardDeviceName.textContent = stream.deviceName + typeLabel;
 
     updateConnectionHealthUI(stream.health);

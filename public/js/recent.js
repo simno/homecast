@@ -42,13 +42,15 @@ function removeRecent(url) {
     renderRecent();
 }
 
+// The device picker's option value: an IP, or `webos:<ip>` for an LG TV cast
+// to through its browser (see devices.js).
 export function lastDevice() {
-    const ip = read(LAST_DEVICE_KEY, null);
-    return typeof ip === 'string' ? ip : null;
+    const value = read(LAST_DEVICE_KEY, null);
+    return typeof value === 'string' ? value : null;
 }
 
-export function rememberDevice(ip) {
-    write(LAST_DEVICE_KEY, ip);
+export function rememberDevice(value) {
+    write(LAST_DEVICE_KEY, value);
 }
 
 // Devices that rejected a converted stream (the server recast them without):

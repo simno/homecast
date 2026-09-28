@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HomeCast</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <!-- Opened on an LG TV by lib/webos.js; plays one stream full screen. -->
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #000;
+            overflow: hidden;
+            cursor: none;
+        }
+        video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background: #000;
+        }
+        video::cue {
+            font-size: 4.5vh;
+        }
+        #message {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e6e1e5;
+            font: 3.5vh system-ui, sans-serif;
+            text-align: center;
+            padding: 0 10vw;
+            pointer-events: none;
+        }
+        #message.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline></video>
+    <div id="message">Loading…</div>
+    <script src="js/webos-player.js"></script>
+</body>
+</html>

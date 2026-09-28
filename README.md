@@ -37,7 +37,7 @@ sources from webpages and serves them to your devices in a compatible format.
 
 ## Features
 
-- 🔍 **Auto-Discovery** — Finds Chromecast and Apple TV devices automatically via mDNS
+- 🔍 **Auto-Discovery** — Finds Chromecast, Apple TV and LG TV devices automatically (mDNS and SSDP)
 - 🎯 **Smart Extraction** — Finds the stream behind a webpage: player markup, embedded JSON, iframe chains, player scripts, and a headless-browser fallback that watches the page's network traffic
 - 📺 **Twitch** — Live channels and VODs resolved to castable HLS
 - 💬 **Subtitles** — Picks up subtitles from the page and from HLS/DASH manifests, or casts a WebVTT/SRT file by URL; switch or turn them off while playing
@@ -49,6 +49,7 @@ sources from webpages and serves them to your devices in a compatible format.
 - 🩺 **Stream Recovery** — Stalled streams restart automatically, with progress shown on the dashboard; a stream the TV can't play is stopped with the TV's reason instead of retried
 - 📡 **AirPlay Casting** — Stream to Apple TVs over AirPlay (not TVs with AirPlay 2 built in; see [AirPlay & Apple TV](#airplay--apple-tv))
 - 🔐 **AirPlay PIN Pairing** — Pair with secured Apple TVs using the on-screen PIN code
+- 📺 **LG TVs** — Play in the TV's own browser, 4K H.264 included, with no conversion or GPU needed. See [LG TVs (webOS)](#lg-tvs-webos)
 - ⚡ **Wake-on-LAN** — Automatically wakes sleeping devices before casting
 - 🔒 **SSRF Protection** — Blocks access to private IPs and localhost
 - ⚡ **Rate Limiting** — Prevents abuse with per-IP limits
@@ -96,8 +97,8 @@ docker run -d \
 # Access at http://localhost:3000
 ```
 
-The `homecast-data` volume keeps AirPlay pairings when the container is re-created (e.g. on upgrade). Without it,
-Apple TVs that need a PIN have to be paired again each time.
+The `homecast-data` volume keeps AirPlay pairings and LG TV keys when the container is re-created (e.g. on upgrade).
+Without it, Apple TVs that need a PIN have to be paired again each time, and LG TVs ask to allow HomeCast again.
 
 ### Docker Compose (Recommended)
 
@@ -204,8 +205,29 @@ All modes are supported by HomeCast.
 
 **TVs with AirPlay 2 built in** (LG, Samsung and others) aren't offered as AirPlay targets: they play video only over
 AirPlay 2's encrypted sessions, not the AirPlay 1 video that HomeCast sends. Most have Chromecast built in as well and
-show up as a Cast device, which is the better route anyway (remote control and 4K conversion). The server log says
-why each is skipped (`no AirPlay 1 video`).
+show up as a Cast device, and LG TVs can also be cast to through their browser (see [LG TVs (webOS)](#lg-tvs-webos)).
+The server log says why each is skipped (`no AirPlay 1 video`).
+
+### LG TVs (webOS)
+
+LG TVs show up as **· LG webOS** in the device list. An LG TV with Chromecast built in on the same address
+appears twice, **· Cast** and **· LG webOS**: pick either.
+
+Casting to **· LG webOS** opens HomeCast's player in the TV's own web browser, full screen. The TV decodes the stream
+itself, so 4K H.264 plays as it is: no [conversion](#4k-on-chromecast-hevc-conversion), no GPU, and no quality lost to
+re-encoding. Pause, seek, go live and the volume work from the dashboard; the remote's play/pause and left/right keys
+work on the TV too. Stop (or a video playing to its end) returns the TV to the input or app it was showing.
+
+- **The first cast** shows an "allow this device?" prompt on the TV. Accept it with the remote; HomeCast keeps the TV's
+  key (in `data/webos-keys.json`) and later casts start without asking.
+- **The TV must be able to reach HomeCast** on its port, since the TV fetches the player page and the stream from it.
+  LG TVs always stream through HomeCast's proxy, whatever the "Proxy stream" setting.
+- **Choppy X/Periscope broadcasts**: these streams declare a wrong frame rate (1000 fps) in their video headers, which
+  LG's player takes at its word. HomeCast rewrites that header as the segments pass through (no re-encoding), which
+  needs FFmpeg: included in the amd64 image, or on the `PATH` when running HomeCast directly.
+- **Subtitles** are chosen when casting (a separate file, or a language from the stream); they can't be switched from
+  the dashboard during playback.
+- DASH streams can't be cast this way; cast them to a Chromecast.
 
 ### Supported Sources
 
@@ -318,8 +340,10 @@ Every candidate is then checked: dead links are dropped, HLS masters report thei
   only covers 4K HLS streams, not continuous MJPEG
 - **DRM-protected DASH** — Streams with `ContentProtection` are listed but can't be cast
 - **DASH on Apple TV** — AirPlay only plays HLS and MP4; cast DASH streams to a Chromecast
-- **AirPlay 2-only TVs** — LG, Samsung and other TVs with AirPlay 2 built in; cast to them over Chromecast instead
-- **4K H.264 on Chromecast without a supported GPU** — plays at 1080p (see [4K on Chromecast](#4k-on-chromecast-hevc-conversion))
+- **AirPlay 2-only TVs** — LG, Samsung and other TVs with AirPlay 2 built in; cast to them over Chromecast, or to an LG
+  TV through [its browser](#lg-tvs-webos)
+- **4K H.264 on Chromecast without a supported GPU** — plays at 1080p (see [4K on Chromecast](#4k-on-chromecast-hevc-conversion));
+  an LG TV plays it in 4K [through its browser](#lg-tvs-webos)
 
 For these services, use their official apps or browser extensions.
 
@@ -344,6 +368,7 @@ For these services, use their official apps or browser extensions.
 | `DISABLE_SSRF_PROTECTION`    | `false`        | **⚠️ DANGER:** Disables SSRF protection (not recommended)                                    |
 | `PLAYWRIGHT_BROWSERS_PATH`   | Auto-detected  | Path to Playwright browser binaries                                                          |
 | `AIRPLAY_PAIRING_STORE`      | `./data/airplay-pairings.json` | Path to AirPlay pairing data file                                           |
+| `WEBOS_KEY_STORE`            | `./data/webos-keys.json` | Path to the keys LG TVs give HomeCast when it's allowed on them                  |
 | `TRANSCODE_DEVICE`           | Auto (tries each `/dev/dri/renderD*`) | GPU for 4K conversion, e.g. `renderD129` or `/dev/dri/renderD129` |
 | `TRANSCODE_ENCODER`          | `auto`         | `auto`, `vaapi` (Intel, AMD), `nvenc` (NVIDIA), `videotoolbox` (Mac), `x265` (software, too slow for 4K; for testing) or `off` |
 | `TRANSCODE_BITRATE`          | `25M`          | Most a converted segment gets (each gets 4× its source bitrate up to this)   |

@@ -35,7 +35,7 @@ function renderDeviceHint(devices) {
         return;
     }
     deviceHintText.textContent = scanning
-        ? 'Looking for Chromecasts and Apple TVs on your network…'
+        ? 'Looking for Chromecasts, Apple TVs and LG TVs on your network…'
         : 'No devices found. Check the device is on the same network as HomeCast and rescan, or';
     manualIpLink.classList.toggle('hidden', scanning);
     deviceHint.classList.remove('hidden');
@@ -61,14 +61,20 @@ export function updateDeviceList(devices) {
         opt.innerText = isScanning() ? 'Scanning for devices…' : 'No devices found';
         deviceSelect.appendChild(opt);
     } else {
-        devices.forEach(d => {
+        const addOption = (d, type, label) => {
             const opt = document.createElement('option');
-            opt.value = d.ip;
-            opt.dataset.type = d.type || 'chromecast';
-            // Text, not an icon: the Apple logo glyph only exists in Apple's fonts.
-            const typeLabel = d.type === 'airplay' ? ' · AirPlay' : '';
-            opt.innerText = `${d.name} (${d.ip})${typeLabel}`;
+            opt.value = optionValue(d.ip, type);
+            opt.dataset.type = type;
+            opt.innerText = `${d.name} (${d.ip})${label}`;
             deviceSelect.appendChild(opt);
+        };
+        devices.forEach(d => {
+            const type = d.type || 'chromecast';
+            // Text, not an icon: the Apple logo glyph only exists in Apple's fonts.
+            const label = { airplay: ' · AirPlay', webos: ' · LG webOS' }[type] || (d.webos ? ' · Cast' : '');
+            addOption(d, type, label);
+            // An LG TV with Cast built in plays either way.
+            if (d.webos && type !== 'webos') addOption(d, 'webos', ' · LG webOS');
         });
     }
 
@@ -80,12 +86,13 @@ export function updateDeviceList(devices) {
     // With every real option disabled the browser would fall through to
     // "Enter IP Manually", hiding the scanning / none-found hint.
     deviceSelect.selectedIndex = 0;
-    if (currentVal && (devices.find(d => d.ip === currentVal) || currentVal === 'manual')) {
+    const offered = (value) => [...deviceSelect.options].some(o => o.value === value);
+    if (currentVal && offered(currentVal)) {
         deviceSelect.value = currentVal;
     } else {
         // Nothing picked yet: offer the device used last time, if it's free.
         const last = lastDevice();
-        if (last && devices.some(d => d.ip === last) && !state.streams.has(last)) deviceSelect.value = last;
+        if (last && offered(last) && !state.streams.has(ipOf(last))) deviceSelect.value = last;
     }
     toggleManualInput();
 }
@@ -113,9 +120,24 @@ export function deviceTypeOf(ip) {
 export function filterDeviceDropdown() {
     deviceSelect.querySelectorAll('option').forEach(opt => {
         if (opt.value && opt.value !== 'manual') {
-            opt.disabled = state.streams.has(opt.value);
+            opt.disabled = state.streams.has(ipOf(opt.value));
         }
     });
+}
+
+// A picker option's value: the IP, prefixed for the LG webOS way of casting
+// to a TV that can also be cast to over Cast (the same IP twice).
+function optionValue(ip, type) {
+    return type === 'webos' ? `webos:${ip}` : ip;
+}
+
+function ipOf(value) {
+    return value.startsWith('webos:') ? value.slice('webos:'.length) : value;
+}
+
+// The picked option, to remember as the last device used.
+export function selectedDeviceKey() {
+    return isManual() ? null : deviceSelect.value || null;
 }
 
 function isManual() {
@@ -133,7 +155,7 @@ export function toggleManualInput() {
 
 // The picked device's IP, or null if none (or an invalid manual IP).
 export function selectedDeviceIp() {
-    if (!isManual()) return deviceSelect.value || null;
+    if (!isManual()) return deviceSelect.value ? ipOf(deviceSelect.value) : null;
     const ip = manualIpInput.value.trim();
     return IPV4_RE.test(ip) ? ip : null;
 }
