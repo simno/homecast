@@ -104,7 +104,12 @@ export function renderPlayback(stream) {
 // Update what the dashboard shows from a device status report. `ended`: the
 // server's word that the live broadcast has finished.
 export function applyPlayerStatus(stream, status, ended = false) {
-    if (status.playerState) stream.playerState = status.playerState;
+    if (status.playerState) {
+        // Back from a pause: the silence was expected, the stale clock restarts.
+        const idleBefore = stream.playerState === 'PAUSED' || stream.playerState === 'IDLE';
+        if (idleBefore && status.playerState !== 'PAUSED' && status.playerState !== 'IDLE') stream.lastStatsAt = Date.now();
+        stream.playerState = status.playerState;
+    }
     if (status.liveSeekableRange) {
         const { start, end, isMovingWindow } = status.liveSeekableRange;
         stream.live = !!isMovingWindow;

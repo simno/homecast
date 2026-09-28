@@ -7,9 +7,9 @@ import {
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
 import { fetchCsrfToken, checkSessionStatus, fetchRunningSessions } from './api.js';
-import { redrawActiveGraphs, startDashboardTimers } from './dashboard.js';
+import { redrawActiveGraphs, startDashboardTimers, renderDashboard } from './dashboard.js';
 import {
-    createStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
+    createStreamEntry, removeStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
 } from './streams.js';
 import { updateDeviceList, findDeviceName, onDeviceChange, wireDeviceControls } from './devices.js';
 import {
@@ -124,55 +124,82 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ===== LIVE UPDATES =====
-connectWebSocket();
+connectWebSocket({ onReconnect: resyncStreams });
 startDashboardTimers({ onStale: (ip) => setStreamHealth(ip, 'stale') });
 
-// ===== RESTORE STREAMS AFTER A RELOAD =====
-async function restoreStreams(savedState) {
-    // Check every saved stream's session concurrently — sequential awaits
-    // would add one round-trip of latency per stream to the restore.
-    const sessions = await Promise.all(
-        savedState.activeStreams.map(async (saved) => ({
-            saved,
-            session: await checkSessionStatus(saved.ip)
-        }))
-    );
+// ===== RESTORE AND RESYNC STREAMS =====
 
-    let anyActive = false;
-    for (const { saved: { ip, deviceName, deviceType }, session } of sessions) {
-        if (!session.active) continue;
-        createStreamEntry(ip, findDeviceName(ip) || deviceName || ip, deviceType || 'chromecast');
-        const stream = state.streams.get(ip);
-        if (session.stats) stream.stats = session.stats;
-        if (session.subtitles) stream.subtitles = session.subtitles;
-        if (session.volume) stream.volume = session.volume;
-        if (session.bufferHealth) stream.bufferHealth = session.bufferHealth;
-        // Where playback is: receivers say only when it changes, so without
-        // this a page opened mid-stream has no position or timeline.
-        if (session.playback?.status) {
-            applyPlayerStatus(stream, session.playback.status, session.playback.ended);
-            if (stream.position) stream.position.at -= session.playback.statusAgeMs;
-            if (stream.liveRange) stream.liveRange.at -= session.playback.statusAgeMs;
+// Bring a stream's entry up to date with the server's view of its session.
+function applySession(stream, session) {
+    if (session.stats) stream.stats = session.stats;
+    if (session.subtitles) stream.subtitles = session.subtitles;
+    if (session.volume) stream.volume = session.volume;
+    if (session.bufferHealth) stream.bufferHealth = session.bufferHealth;
+    // Where playback is: receivers say only when it changes, so without
+    // this a page opened mid-stream has no position or timeline.
+    if (session.playback?.status) {
+        applyPlayerStatus(stream, session.playback.status, session.playback.ended);
+        if (stream.position) stream.position.at -= session.playback.statusAgeMs;
+        if (stream.liveRange) stream.liveRange.at -= session.playback.statusAgeMs;
+    }
+    const delay = session.tracking?.lastDelay;
+    if (delay > 0 && !stream.ended) {
+        stream.currentDelay = delay;
+        stream.hasDelay = true;
+    }
+    // Fresh from the server: not stale, whatever went missing before.
+    stream.lastStatsAt = Date.now();
+}
+
+// Match the page to the server: `candidates` ([{ ip, deviceName, deviceType }])
+// are checked, those still playing are shown (new entries created, existing
+// ones updated in place, keeping their graphs), and entries whose session has
+// ended in the meantime are removed.
+async function syncStreams(candidates, { activeStreamIp } = {}) {
+    // Check every stream's session concurrently — sequential awaits would
+    // add one round-trip of latency per stream.
+    const sessions = await Promise.all(candidates.map(async (candidate) => ({
+        candidate,
+        session: await checkSessionStatus(candidate.ip)
+    })));
+
+    for (const { candidate: { ip, deviceName, deviceType }, session } of sessions) {
+        if (!session.active) {
+            if (state.streams.has(ip)) removeStreamEntry(ip);
+            continue;
         }
-        const delay = session.tracking?.lastDelay;
-        if (delay > 0 && !stream.ended) {
-            stream.currentDelay = delay;
-            stream.hasDelay = true;
+        if (!state.streams.has(ip)) {
+            createStreamEntry(ip, findDeviceName(ip) || deviceName || ip, deviceType || session.type || 'chromecast');
         }
-        anyActive = true;
+        applySession(state.streams.get(ip), session);
+        setStreamHealth(ip, 'healthy');
     }
 
-    if (!anyActive) {
-        console.log('[State] No saved sessions are still active');
+    if (state.streams.size === 0) {
+        console.log('[State] No streams are active');
         clearState();
         return;
     }
 
     const ips = Array.from(state.streams.keys());
-    state.activeStreamIp = state.streams.has(savedState.activeStreamIp) ? savedState.activeStreamIp : ips[0];
+    if (!state.streams.has(state.activeStreamIp)) {
+        state.activeStreamIp = state.streams.has(activeStreamIp) ? activeStreamIp : ips[0];
+    }
     renderStreamBar();
     setMode('dashboard');
-    console.log('[State] Restored', ips.length, 'active stream(s)');
+    renderDashboard();
+    console.log('[State] Showing', ips.length, 'active stream(s)');
+}
+
+// After the live connection to the server was lost and is back: whatever
+// happened meanwhile (streams ended, started elsewhere, moved on) arrived
+// nowhere, so ask.
+async function resyncStreams() {
+    const known = new Map([...state.streams].map(([ip, s]) => [ip, { ip, deviceName: s.deviceName, deviceType: s.deviceType }]));
+    for (const { ip, type, deviceName } of await fetchRunningSessions()) {
+        if (!known.has(ip)) known.set(ip, { ip, deviceName, deviceType: type });
+    }
+    if (known.size > 0) await syncStreams([...known.values()]);
 }
 
 // Streams to restore: what the server is playing, plus what this browser
@@ -195,7 +222,7 @@ window.addEventListener('load', () => {
     // Wait a moment for the device list to arrive via WebSocket
     setTimeout(async () => {
         const toRestore = await streamsToRestore();
-        if (toRestore) restoreStreams(toRestore);
+        if (toRestore) syncStreams(toRestore.activeStreams, { activeStreamIp: toRestore.activeStreamIp });
     }, 1000);
 });
 

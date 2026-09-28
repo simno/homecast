@@ -244,7 +244,9 @@ export function startDashboardTimers({ onStale }) {
     setInterval(() => {
         const now = Date.now();
         state.streams.forEach((stream, ip) => {
-            if (stream.health !== 'stale' && stream.lastStatsAt && (now - stream.lastStatsAt > STALE_TIMEOUT)) {
+            // A paused TV fetches nothing, so silence then is expected.
+            const expectingData = stream.playerState !== 'PAUSED' && stream.playerState !== 'IDLE';
+            if (expectingData && stream.health !== 'stale' && stream.lastStatsAt && (now - stream.lastStatsAt > STALE_TIMEOUT)) {
                 stream.health = 'stale';
                 console.log(`[Health] Stream ${ip} marked stale (no stats for ${STALE_TIMEOUT / 1000}s)`);
                 onStale(ip);

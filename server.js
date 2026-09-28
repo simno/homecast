@@ -24,7 +24,25 @@ const server = http.createServer(app);
 
 // WebSocket server with origin validation
 const wss = createWebSocketServer(server);
+
+// Ping every page now and then: a connection that died without closing (a
+// laptop put to sleep, a dropped Wi-Fi link) is found and cleaned up, and
+// idle ones aren't dropped along the way. Browsers answer pings themselves.
+const WS_PING_INTERVAL_MS = 30000;
+setInterval(() => {
+    for (const client of wss.clients) {
+        if (client.isAlive === false) {
+            client.terminate();
+            continue;
+        }
+        client.isAlive = false;
+        client.ping();
+    }
+}, WS_PING_INTERVAL_MS).unref();
+
 wss.on('connection', (ws, req) => {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
     const origin = req.headers.origin;
     const host = req.headers.host;
     if (origin) {

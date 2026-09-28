@@ -151,22 +151,58 @@ const handlers = {
     }
 };
 
-export function connectWebSocket() {
+// A dropped connection (server restart, laptop sleep, Wi-Fi blip) is retried
+// with backoff, and at once when a hidden tab is shown again. Nothing the
+// server sent meanwhile arrives, so `onReconnect` resyncs the page.
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 10000;
+
+export function connectWebSocket({ onReconnect } = {}) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
+    let ws = null;
+    let retryTimer = null;
+    let retryDelay = RECONNECT_MIN_MS;
+    let connectedBefore = false;
 
-    ws.onmessage = (event) => {
-        let data;
-        try {
-            data = JSON.parse(event.data);
-        } catch (e) {
-            console.error('[WebSocket] Failed to parse message:', e);
-            return;
-        }
-        handlers[data.type]?.(data);
+    const open = () => {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+        ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+        ws.onopen = () => {
+            retryDelay = RECONNECT_MIN_MS;
+            if (connectedBefore) {
+                console.log('[WebSocket] Reconnected');
+                onReconnect?.();
+            }
+            connectedBefore = true;
+        };
+
+        ws.onmessage = (event) => {
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                console.error('[WebSocket] Failed to parse message:', e);
+                return;
+            }
+            handlers[data.type]?.(data);
+        };
+
+        // An error is always followed by close; reconnecting happens there.
+        ws.onclose = () => {
+            if (retryTimer) return;
+            console.warn(`[WebSocket] Connection lost, retrying in ${retryDelay / 1000}s`);
+            retryTimer = setTimeout(open, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, RECONNECT_MAX_MS);
+        };
     };
 
-    ws.onerror = () => {
-        console.warn('WebSocket connection failed, falling back to polling');
-    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || ws?.readyState !== WebSocket.CLOSED) return;
+        retryDelay = RECONNECT_MIN_MS;
+        open();
+    });
+
+    open();
 }
