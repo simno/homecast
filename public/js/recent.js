@@ -1,9 +1,11 @@
-// What the user cast before: recent page URLs (offered under the URL field)
-// and the last device (preselected next time). Kept in this browser only.
+// What the user cast before: recent page URLs (offered under the URL field),
+// the last device (preselected next time), and devices that couldn't play a
+// stream converted to 4K HEVC. Kept in this browser only.
 import { recentUrls, recentList, recentClearBtn, videoUrlInput, resolvedUrlContainer } from './dom.js';
 
 const RECENT_KEY = 'homecast_recent';
 const LAST_DEVICE_KEY = 'homecast_last_device';
+const NO_CONVERSION_KEY = 'homecast_no_conversion';
 const MAX_RECENT = 5;
 
 function read(key, fallback) {
@@ -47,6 +49,19 @@ export function lastDevice() {
 
 export function rememberDevice(ip) {
     write(LAST_DEVICE_KEY, ip);
+}
+
+// Devices that rejected a converted stream (the server recast them without):
+// "Highest available" stops picking conversion for them.
+export function cannotPlayConverted(ip) {
+    const list = read(NO_CONVERSION_KEY, []);
+    return Array.isArray(list) && list.includes(ip);
+}
+
+export function rememberCannotPlayConverted(ip) {
+    if (cannotPlayConverted(ip)) return;
+    const list = read(NO_CONVERSION_KEY, []);
+    write(NO_CONVERSION_KEY, [...(Array.isArray(list) ? list : []), ip]);
 }
 
 function hostOf(url) {

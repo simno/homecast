@@ -149,7 +149,7 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
 
         const originalM3u8 = Buffer.concat(chunks).toString('utf8');
         const baseUrl = new URL(url);
-        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
+        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode });
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
         const plan = transcode ? planTranscode(filteredM3u8, quality) : null;
         if (plan === 'master') filteredM3u8 = transcoder.declareHevc(filteredM3u8);
@@ -516,10 +516,11 @@ async function serveImage(res, { url, headers }) {
 // The source bytes of a segment to convert, fetched like any proxied request
 // (Referer handling, pinned DNS).
 function segmentFetcher(headers) {
-    return async (segmentUrl) => {
+    return async (segmentUrl, signal) => {
         const response = await fetchUpstream(segmentUrl, headers, {
             method: 'get',
             responseType: 'arraybuffer',
+            signal,
             httpAgent: httpAgent,
             httpsAgent: httpsAgent,
             timeout: 15000,
@@ -553,6 +554,10 @@ async function serveConvertedSegment(res, { url, headers, deviceIp, stats }) {
 
     stats.segmentCount++;
     stats.totalBytes += media.length;
+    // The dashboard's bitrate is what the receiver gets: the converted
+    // stream's, not the source's the master playlist declared.
+    const transcode = transcoder.statsFor(url);
+    if (transcode?.outputKbps) stats.bitrate = transcode.outputKbps;
     const duration = (Date.now() - stats.startTime) / 1000;
     broadcast({
         type: 'streamStats',
@@ -563,7 +568,8 @@ async function serveConvertedSegment(res, { url, headers, deviceIp, stats }) {
             totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
             transferRate: duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0,
             duration: Math.round(duration),
-            delay: playbackTracking.get(deviceIp)?.lastDelay || 0
+            delay: playbackTracking.get(deviceIp)?.lastDelay || 0,
+            transcode
         }
     });
 

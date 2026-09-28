@@ -10,6 +10,8 @@ const { test, before, after, afterEach } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const net = require('net');
+const { execFileSync } = require('child_process');
+const WebSocket = require('ws');
 
 const MOCK_IP = '127.0.0.1';
 const MP4 = Buffer.alloc(64 * 1024, 1);
@@ -34,6 +36,12 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
         const end = path === '/vod.m3u8' ? '#EXT-X-ENDLIST\n' : '';
         return res.end(`#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n${end}`);
+    }
+    if (path === '/longlive.m3u8') {
+        // Forty seconds of live window: long enough to start short of its edge.
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        const segments = Array.from({ length: 10 }, () => '#EXTINF:4,\nseg1.ts').join('\n');
+        return res.end(`#EXTM3U\n#EXT-X-TARGETDURATION:4\n${segments}\n`);
     }
     if (path === '/seg1.ts') {
         res.writeHead(200, { 'Content-Type': 'video/mp2t' });
@@ -269,4 +277,109 @@ test('seeks in a recording stop short of its end', () => {
     assert.strictEqual(clampSeek({ media: { duration: 600 } }, 900), 599);
     assert.strictEqual(clampSeek({ media: { duration: 600 } }, -5), 0);
     assert.strictEqual(clampSeek({}, 42), 42);
+});
+
+// --- Starting live streams at the edge ---
+
+// The mock starts playing on its own after a simulated buffer; start it now.
+function startPlaying(mock) {
+    clearTimeout(mock.startTimeout);
+    mock.play();
+}
+
+test('a live stream is loaded starting short of its edge, and not seeked again', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/longlive.m3u8`, type: 'hls' });
+    const mock = receiver();
+    assert.strictEqual(mock.requestedStart, 25, '40s window, started 15s short of the edge');
+
+    startPlaying(mock);
+    mock.emit('status', mock.getStatus()); // a status while playing settles it
+    assert.strictEqual(mock.currentTime, 25);
+    assert.deepStrictEqual(mock.seeks, [], 'already at the edge: no second buffering');
+});
+
+test('a receiver that ignores the start position is still moved to the edge', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/longlive.m3u8`, type: 'hls' });
+    const mock = receiver();
+    mock.ignoresStartTime = true;
+
+    startPlaying(mock);
+    assert.strictEqual(mock.seeks.length, 1);
+    assert.ok(Math.abs(mock.seeks[0] - (mock.liveEdgeTime - 15)) < 1, `seeked to ${mock.seeks[0]}`);
+});
+
+test('a "live" stream whose window turns out fixed goes back to its start', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/longlive.m3u8`, type: 'hls' });
+    const mock = receiver();
+    mock.fixedWindow = true; // a replay served without #EXT-X-ENDLIST
+
+    startPlaying(mock);
+    assert.deepStrictEqual(mock.seeks, [0]);
+});
+
+test('a URL marked as a replay is never started at its edge', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/longlive.m3u8?type=replay`, type: 'hls' });
+    assert.strictEqual(receiver().requestedStart, null);
+});
+
+// --- Receiver errors ---
+
+// Messages the page would get over its WebSocket, from now on.
+async function pageMessages() {
+    const ws = new WebSocket(`ws://127.0.0.1:${process.env.PORT}`);
+    const messages = [];
+    ws.on('message', (data) => messages.push(JSON.parse(data)));
+    await new Promise((resolve, reject) => {
+        ws.once('open', resolve);
+        ws.once('error', reject);
+    });
+    return { messages, close: () => ws.close() };
+}
+
+test('a receiver error ends the session, without recovery, and tells the page why', async () => {
+    registerMock();
+    const page = await pageMessages();
+    try {
+        await cast({ url: `${cdn}/vod.m3u8`, type: 'hls' });
+        receiver().fail({ type: 'ERROR', detailedErrorCode: 104 });
+
+        assert.ok(await waitFor(() => page.messages.some(m => m.type === 'castError')), 'the page hears about it');
+        const error = page.messages.find(m => m.type === 'castError');
+        assert.strictEqual(error.deviceIp, MOCK_IP);
+        assert.match(error.message, /could not decode.*\(Receiver error 104\.\)/);
+        assert.strictEqual(activeSessions.has(MOCK_IP), false);
+        assert.strictEqual(streamRecovery.has(MOCK_IP), false, 'recovery must not retry what the TV cannot play');
+    } finally {
+        page.close();
+    }
+});
+
+let hasX265 = false;
+try {
+    hasX265 = execFileSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }).includes('libx265');
+} catch { /* no ffmpeg */ }
+
+test('a converted cast the TV rejects before playing is recast without conversion', { skip: !hasX265 && 'ffmpeg with libx265 not installed' }, async () => {
+    process.env.TRANSCODE_ENCODER = 'x265';
+    await require('../lib/transcode').detect();
+    registerMock();
+    const page = await pageMessages();
+    try {
+        const res = await cast({ url: `${cdn}/vod.m3u8`, type: 'hls', proxy: true, transcode: true });
+        assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+        const first = receiver();
+        assert.ok(first.media.contentId.includes('transcode=hevc'));
+
+        first.fail({ type: 'LOAD_FAILED' });
+        assert.ok(await waitFor(() => page.messages.some(m => m.type === 'castFallback')), 'the page hears about it');
+        assert.ok(await waitFor(() => receiver() && receiver() !== first), 'recast on a new receiver session');
+        assert.ok(!receiver().media.contentId.includes('transcode=hevc'), 'without conversion');
+        assert.ok(!page.messages.some(m => m.type === 'castError'), 'a fallback is not reported as a failure');
+    } finally {
+        page.close();
+    }
 });

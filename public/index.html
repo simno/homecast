@@ -291,6 +291,36 @@
                         </div>
                     </div>
 
+                    <!-- Conversion to HEVC (lib/transcode.js), for converted streams only -->
+                    <section id="transcode-panel" class="transcode-panel hidden" aria-labelledby="transcode-title">
+                        <div class="transcode-header">
+                            <h3 id="transcode-title" class="transcode-title">Converting to HEVC</h3>
+                            <span id="transcode-encoder" class="transcode-encoder"></span>
+                        </div>
+                        <div class="stats-grid-4">
+                            <div class="stat-tile" id="transcode-speed-tile">
+                                <span class="stat-label">Speed</span>
+                                <span class="stat-value" id="stat-transcode-speed">–</span>
+                                <span class="stat-sub" id="stat-transcode-speed-detail"></span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">Ready Ahead</span>
+                                <span class="stat-value" id="stat-transcode-ahead">–</span>
+                                <span class="stat-sub" id="stat-transcode-ahead-detail"></span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">Converted Bitrate</span>
+                                <span class="stat-value" id="stat-transcode-bitrate">–</span>
+                                <span class="stat-sub" id="stat-transcode-bitrate-detail"></span>
+                            </div>
+                            <div class="stat-tile">
+                                <span class="stat-label">GPU</span>
+                                <span class="stat-value" id="stat-transcode-gpu">–</span>
+                                <span class="stat-sub" id="stat-transcode-gpu-detail"></span>
+                            </div>
+                        </div>
+                    </section>
+
                     <!-- Technical stats, collapsed by default -->
                     <details id="stats-details" class="stats-details">
                         <summary>More stats</summary>

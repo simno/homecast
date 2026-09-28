@@ -92,6 +92,19 @@ export const stat = {
     bufferHealth: $('stat-buffer-health'),
     bufferDetail: $('stat-buffer-detail')
 };
+export const transcodePanel = {
+    panel: $('transcode-panel'),
+    encoder: $('transcode-encoder'),
+    speedTile: $('transcode-speed-tile'),
+    speed: $('stat-transcode-speed'),
+    speedDetail: $('stat-transcode-speed-detail'),
+    ahead: $('stat-transcode-ahead'),
+    aheadDetail: $('stat-transcode-ahead-detail'),
+    bitrate: $('stat-transcode-bitrate'),
+    bitrateDetail: $('stat-transcode-bitrate-detail'),
+    gpu: $('stat-transcode-gpu'),
+    gpuDetail: $('stat-transcode-gpu-detail')
+};
 
 // PIN pairing modal
 export const pinModal = $('pin-modal');

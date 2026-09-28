@@ -6,6 +6,7 @@ import { createStreamEntry, removeStreamEntry, renderStreamBar, setMode, setStre
 import { renderStats, renderBufferHealth, setStreamNotice } from './dashboard.js';
 import { renderDashboardSubtitles } from './subtitles.js';
 import { applyPlayerStatus, renderPlayback } from './playback.js';
+import { rememberCannotPlayConverted } from './recent.js';
 
 function onStreamStats(data) {
     const stream = state.streams.get(data.deviceIp);
@@ -64,7 +65,9 @@ function onPlayerStatus(data) {
             else if (playerState === 'BUFFERING') updateStatus('Buffering...', 'loading');
             else if (playerState === 'PAUSED') updateStatus('Paused', 'info');
         }
-    } else if (playerState === 'IDLE' && stream) {
+    } else if (playerState === 'IDLE' && stream && data.status.idleReason !== 'ERROR') {
+        // A failed stream stays up with its error (see onCastError) until
+        // the user closes it.
         removeStreamEntry(ip);
     }
 }
@@ -87,6 +90,24 @@ function onStreamRecovery(data) {
         setStreamHealth(ip, 'failed');
         setStreamNotice(ip, { type: 'error', message: 'HomeCast could not restart this stream. Stop it and cast again.' });
     }
+}
+
+// The receiver gave up on a stream: keep its pill, marked failed, with the
+// reason, rather than letting it vanish.
+function onCastError(data) {
+    const ip = data.deviceIp;
+    if (!state.streams.has(ip)) return;
+    setStreamHealth(ip, 'failed');
+    setStreamNotice(ip, { type: 'error', message: data.message });
+    if (ip === state.activeStreamIp) updateStatus('Playback failed', 'error');
+}
+
+// The TV rejected a converted stream and the server recast it without
+// conversion: say so, and don't pick conversion for this device again.
+function onCastFallback(data) {
+    rememberCannotPlayConverted(data.deviceIp);
+    if (!state.streams.has(data.deviceIp)) return;
+    setStreamNotice(data.deviceIp, { type: 'warning', message: data.message });
 }
 
 function onConnectionHealth(data) {
@@ -120,6 +141,8 @@ const handlers = {
     playerStatus: onPlayerStatus,
     connectionHealth: onConnectionHealth,
     streamRecovery: onStreamRecovery,
+    castError: onCastError,
+    castFallback: onCastFallback,
     volume: onVolume,
     subtitleTracks: onSubtitleTracks,
     pairingStatus: (data) => {

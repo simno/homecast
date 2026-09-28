@@ -2,7 +2,7 @@
 import { drawRateGraph, drawDelayGraph, graphColors } from './graphs.js';
 import {
     dashboardDeviceName, healthDot, healthText, stat,
-    dashboardNotice, dashboardNoticeText, dashboardNoticeClose, statsDetails
+    dashboardNotice, dashboardNoticeText, dashboardNoticeClose, statsDetails, transcodePanel
 } from './dom.js';
 import { state, HEALTH_LABELS, MAX_HISTORY, STALE_TIMEOUT } from './state.js';
 import { renderDashboardSubtitles } from './subtitles.js';
@@ -115,7 +115,7 @@ export function renderStats(stats) {
         else durationDisplay = `${seconds}s`;
     }
 
-    stat.resolution.textContent = resolutionDisplay;
+    stat.resolution.textContent = stats.transcode ? `${resolutionDisplay} · HEVC` : resolutionDisplay;
     stat.bitrate.textContent = bitrateDisplay;
     stat.transferred.textContent = transferredDisplay;
     stat.segments.textContent = stats.segmentCount || 0;
@@ -124,6 +124,57 @@ export function renderStats(stats) {
     stat.frameRate.textContent = stats.frameRate
         ? `${Math.round(stats.frameRate)} FPS`
         : '–';
+    renderTranscode(stats.transcode);
+}
+
+// Below this, conversion is barely keeping ahead of playback.
+const SPEED_WARNING = 1.2;
+
+function formatKbps(kbps) {
+    return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} Kbps`;
+}
+
+// "vaapi (/dev/dri/renderD129, low-power)" -> "Intel/AMD GPU (VAAPI), renderD129"
+function encoderLabel(name) {
+    if (!name) return '';
+    if (name.startsWith('vaapi')) {
+        const node = /renderD\d+/.exec(name)?.[0];
+        return `GPU (VAAPI)${node ? `, ${node}` : ''}`;
+    }
+    if (name.startsWith('videotoolbox')) return 'Apple VideoToolbox';
+    if (name.startsWith('x265')) return 'Software (x265)';
+    return name;
+}
+
+// The conversion panel: only for streams converted to HEVC on the way through.
+function renderTranscode(t) {
+    const p = transcodePanel;
+    p.panel.classList.toggle('hidden', !t);
+    if (!t) return;
+
+    p.encoder.textContent = encoderLabel(t.encoder);
+
+    const slow = t.speed !== null && t.speed < SPEED_WARNING;
+    p.speedTile.classList.toggle('is-warning', slow);
+    p.speed.textContent = t.speed !== null ? `${t.speed.toFixed(1)}× real time` : '–';
+    p.speedDetail.textContent = t.lastEncodeMs !== null && t.lastSegmentSeconds
+        ? `${(t.lastEncodeMs / 1000).toFixed(1)} s for the last ${t.lastSegmentSeconds.toFixed(1)} s segment`
+        : '';
+    if (slow) p.speedDetail.textContent += ' — may fall behind';
+
+    p.ahead.textContent = `${t.readyAhead} segment${t.readyAhead === 1 ? '' : 's'}`;
+    p.aheadDetail.textContent = t.queued > 0 ? `${t.running} converting, ${t.queued} queued` : `${t.running} converting`;
+
+    p.bitrate.textContent = t.outputKbps ? formatKbps(t.outputKbps) : '–';
+    p.bitrateDetail.textContent = t.sourceKbps ? `from ${formatKbps(t.sourceKbps)} H.264` : '';
+
+    if (t.gpu?.busyPercent !== null && t.gpu?.busyPercent !== undefined) {
+        p.gpu.textContent = `${t.gpu.busyPercent}% busy`;
+        p.gpuDetail.textContent = t.gpu.clockMhz ? `${Math.round(t.gpu.clockMhz)} MHz` : '';
+    } else {
+        p.gpu.textContent = '–';
+        p.gpuDetail.textContent = t.gpu ? 'Measuring…' : 'Load not readable on this system';
+    }
 }
 
 function resetDashboardStats() {
@@ -134,6 +185,7 @@ function resetDashboardStats() {
     stat.segments.textContent = '0';
     stat.duration.textContent = '0s';
     stat.cache.textContent = '0';
+    renderTranscode(null);
 }
 
 // The score, big, with what it's made of underneath.

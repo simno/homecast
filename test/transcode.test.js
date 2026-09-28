@@ -88,6 +88,14 @@ test('the master declares HEVC for the converted variant and keeps the audio cod
     assert.ok(out.includes(`CODECS="${transcoder.HEVC_CODEC},mp4a.40.2"`));
 });
 
+test('segments are encoded at a multiple of their source bitrate, within limits', () => {
+    // 1.3 MB over 2 s is 5.2 Mbps of H.264; converting it well takes 4x that.
+    assert.strictEqual(transcoder.targetBitrate(1.3e6, 2), 20800000);
+    assert.strictEqual(transcoder.targetBitrate(10e6, 2), 25000000, 'capped at TRANSCODE_BITRATE');
+    assert.strictEqual(transcoder.targetBitrate(50e3, 2), 1000000, 'never starved');
+    assert.strictEqual(transcoder.targetBitrate(1e6, 0), 25000000, 'the cap when the length is unknown');
+});
+
 test('only unencrypted MPEG-TS segments can be converted', () => {
     assert.strictEqual(transcoder.canConvertMediaPlaylist('#EXTM3U\n#EXTINF:2,\na.ts\n'), true);
     assert.strictEqual(transcoder.canConvertMediaPlaylist('#EXTM3U\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:2,\na.ts\n'), true);

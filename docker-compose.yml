@@ -36,7 +36,11 @@ services:
       # Optional: 4K conversion for Chromecast (needs the GPU devices above).
       # With several GPUs, name the render node to use (e.g. the Arc, not the iGPU)
       # - TRANSCODE_DEVICE=/dev/dri/renderD129
-      # - TRANSCODE_BITRATE=8M
+      # Converted video gets 4x the source's bitrate (re-encoding needs more
+      # bits than the original to keep its quality), up to this ceiling
+      # - TRANSCODE_BITRATE=25M
+      # Simultaneous encodes (default 2)
+      # - TRANSCODE_CONCURRENCY=2
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:' + (process.env.PORT || 3000) + '/api/devices', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s

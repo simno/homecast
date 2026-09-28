@@ -17,7 +17,7 @@ import { showPinPrompt } from './pairing.js';
 import {
     populateSubtitleOptions, subtitleChoiceReady, selectedSubtitle, rememberSubtitleChoice
 } from './subtitles.js';
-import { addRecent, rememberDevice, renderRecent } from './recent.js';
+import { addRecent, rememberDevice, renderRecent, cannotPlayConverted } from './recent.js';
 
 // ===== FORM STATE =====
 
@@ -312,8 +312,9 @@ function selectStream(video) {
 // which have no selectable variants. A Chromecast can't decode some variants
 // (4K H.264): it loads them, plays a couple of segments, then stops. For a
 // Chromecast those are offered only when the server can convert them to HEVC
-// on the way through, and say so. `keep`: hold on to the current choice if
-// still offered.
+// on the way through, and say so — and "Highest available" then means the
+// converted top quality, unless this device has already failed to play one.
+// `keep`: hold on to the current choice if still offered.
 function populateQualityOptions(video, { keep = false } = {}) {
     const previous = keep ? qualitySelect.value : 'highest';
     qualitySelect.innerHTML = '';
@@ -331,8 +332,12 @@ function populateQualityOptions(video, { keep = false } = {}) {
         qualitySelect.appendChild(opt);
     };
 
-    addOption('highest', 'Highest available');
     const isChromecast = selectedDeviceType() !== 'airplay';
+    const topConvertible = isChromecast && !cannotPlayConverted(selectedDeviceIp())
+        ? (video.qualities || []).find(q => q.convertible)
+        : null;
+    if (topConvertible) addOption('highest', `Highest available (${topConvertible.label}, converted)`, true);
+    else addOption('highest', 'Highest available');
     (video.qualities || []).forEach(q => {
         if (!isChromecast || q.chromecast !== false) addOption(q.value, q.label);
         else if (q.convertible) addOption(q.value, `${q.label} (converted, 4K Chromecasts)`, true);

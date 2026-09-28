@@ -1,40 +1,52 @@
 const { test } = require('node:test');
 const assert = require('assert');
-require('../lib/mdns');
-const { DNSPacket, DNSRecord } = require('dns-js');
-const decoder = require('mdns-js/lib/decoder');
-const { ServiceType } = require('mdns-js/lib/service_type');
+const dnsPacket = require('dns-packet');
+const { servicesInResponse, tcp } = require('../lib/mdns');
 
-// A service-enumeration answer, as devices send them, listing `types`.
-function enumerationResponse(types) {
-    const packet = new DNSPacket();
-    packet.header.qr = 1;
-    for (const type of types) {
-        const rec = new DNSRecord('_services._dns-sd._udp.local', DNSRecord.Type.PTR, 1, 120);
-        rec.data = type;
-        packet.answer.push(rec);
-    }
-    return DNSPacket.toBuffer(packet);
+// A response as a Cast TV sends it: the PTR naming the instance, and its SRV,
+// TXT and A records.
+function castResponse({ extraPtrs = [] } = {}) {
+    const instance = 'OLED77G36LA-f270._googlecast._tcp.local';
+    return {
+        type: 'response',
+        answers: [
+            ...extraPtrs.map(data => ({ name: '_services._dns-sd._udp.local', type: 'PTR', data })),
+            { name: '_googlecast._tcp.local', type: 'PTR', data: instance }
+        ],
+        additionals: [
+            { name: instance, type: 'SRV', data: { target: 'f270.local', port: 8009 } },
+            { name: instance, type: 'TXT', data: [Buffer.from('id=f270'), Buffer.from('fn=LG G3 TV'), Buffer.from('md=OLED77G36LA')] },
+            { name: 'f270.local', type: 'A', data: '192.168.2.17' }
+        ]
+    };
 }
 
-test('a service name over mdns-js\'s 20-character limit no longer throws, and the rest of the packet is read', () => {
-    // Spotify clients announce this; stock mdns-js threw from its socket
-    // handler and took the server down in a restart loop.
-    const data = decoder.decodeMessage(enumerationResponse([
-        '_spotify-social-listening._tcp.local',
-        '_googlecast._tcp.local'
-    ]));
-    assert.deepStrictEqual(data.type.map(t => t.toString()), ['_spotify-social-listening._tcp', '_googlecast._tcp']);
+test('a Cast device is read from its response, in the shape discovery expects', () => {
+    const [service] = servicesInResponse(castResponse(), { address: '192.168.2.99' }, tcp('googlecast'));
+    assert.deepStrictEqual(service, {
+        type: [{ name: 'googlecast', protocol: 'tcp' }],
+        fullname: 'OLED77G36LA-f270._googlecast._tcp.local',
+        host: 'f270.local',
+        port: 8009,
+        addresses: ['192.168.2.17'],
+        txt: ['id=f270', 'fn=LG G3 TV', 'md=OLED77G36LA']
+    });
 });
 
-test('an unparseable service type becomes an empty type instead of an exception', () => {
-    const type = new ServiceType('not a service');
-    assert.strictEqual(type.name, '');
-    assert.strictEqual(type.protocol, '');
+test('a service name longer than 20 characters is just another record (it crashed mdns-js)', () => {
+    // Round-trip through the wire format, as multicast-dns decodes it.
+    const wire = dnsPacket.encode(castResponse({ extraPtrs: ['_spotify-social-listening._tcp.local'] }));
+    const services = servicesInResponse(dnsPacket.decode(wire), { address: '192.168.2.17' }, tcp('googlecast'));
+    assert.deepStrictEqual(services.map(s => s.txt.find(t => t.startsWith('fn='))), ['fn=LG G3 TV']);
 });
 
-test('valid service types parse as before', () => {
-    const type = new ServiceType('_googlecast._tcp');
-    assert.strictEqual(type.name, 'googlecast');
-    assert.strictEqual(type.protocol, 'tcp');
+test('other service types are ignored', () => {
+    assert.deepStrictEqual(servicesInResponse(castResponse(), {}, tcp('airplay')), []);
+});
+
+test('without an A record, the address the response came from is used', () => {
+    const packet = castResponse();
+    packet.additionals = packet.additionals.filter(r => r.type !== 'A');
+    const [service] = servicesInResponse(packet, { address: '192.168.2.17' }, tcp('googlecast'));
+    assert.deepStrictEqual(service.addresses, ['192.168.2.17']);
 });

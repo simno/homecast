@@ -1363,6 +1363,35 @@ select:focus {
   color: var(--md-on-surface-secondary);
 }
 
+/* Conversion to HEVC, for converted streams */
+.transcode-panel { margin: -8px 0 24px; }
+
+.transcode-panel .stats-grid-4 { margin-bottom: 0; }
+
+.transcode-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.transcode-title {
+  margin: 0;
+  font: var(--typescale-label);
+  color: var(--md-on-surface-variant);
+}
+
+.transcode-encoder {
+  font: var(--typescale-label-sm);
+  color: var(--md-on-surface-secondary);
+  text-align: right;
+}
+
+.stat-tile.is-warning { border-color: var(--warning); }
+
+.stat-tile.is-warning .stat-sub { color: var(--warning); }
+
 /* Technical stats, collapsed */
 .stats-details {
   margin: -12px 0 24px;
