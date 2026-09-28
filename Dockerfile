@@ -17,6 +17,20 @@ RUN groupadd -g 1001 nodejs && \
 #                    stops before the headless-browser step
 ARG VARIANT=full
 
+# ffmpeg and Intel's VAAPI driver, for converting 4K H.264 variants to HEVC so
+# Chromecasts can play them (lib/transcode.js; needs /dev/dri passed through,
+# see docker-compose.yml). Intel GPUs only, so amd64 only: elsewhere the
+# feature simply stays off. TRANSCODE=none leaves it out (~170MB smaller).
+# The driver is in Debian's non-free component; the free build lacks encoders.
+ARG TRANSCODE=intel
+ARG TARGETARCH
+RUN if [ "$TRANSCODE" = "intel" ] && [ "$TARGETARCH" = "amd64" ]; then \
+        sed -i 's/^Components: main.*/Components: main non-free/' /etc/apt/sources.list.d/debian.sources && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends ffmpeg intel-media-va-driver-non-free && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Install production dependencies. For full, add Chromium and the system
 # libraries it needs (--with-deps: libnss3, libgbm, fonts, ...); this must run
 # as root, before switching user. --only-shell skips the headed Chromium build

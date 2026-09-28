@@ -161,6 +161,10 @@ if (require.main === module) {
     require('./lib/airplay-pairing-store').initPairingStore().catch(err => {
         console.error('[AirPlay-Pairing] Failed to init pairing store:', err);
     });
+    // Probe for a hardware HEVC encoder (4K conversion for Chromecast).
+    require('./lib/transcode').detect().catch(err => {
+        console.error('[Transcode] Encoder detection failed:', err);
+    });
 
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`HomeCast running on port ${PORT}`);

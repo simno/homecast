@@ -250,6 +250,18 @@ test('parses master variants highest first, labelling high frame rates', () => {
     assert.strictEqual(variants[1].bandwidth, 2800000, 'BANDWIDTH, not AVERAGE-BANDWIDTH');
 });
 
+test('variants carry their codecs', () => {
+    const master = [
+        '#EXTM3U',
+        '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+        '1080.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360',
+        '360.m3u8'
+    ].join('\n');
+    const variants = scan.parseHlsVariants(master, 'https://cdn.example/master.m3u8');
+    assert.deepStrictEqual(variants.map(v => v.codecs), ['avc1.640028,mp4a.40.2', '']);
+});
+
 test('media playlists have no variants', () => {
     assert.deepStrictEqual(scan.parseHlsVariants('#EXTM3U\n#EXTINF:4,\na.ts\n', 'https://x.example/'), []);
 });

@@ -39,6 +39,15 @@ const SUBBED_MASTER = [
     'v/720/index.m3u8',
     ''
 ].join('\n');
+// Periscope/X's shape: a 4K rendition in H.264, which no cast receiver decodes.
+const UHD_H264_MASTER = [
+    '#EXTM3U',
+    '#EXT-X-STREAM-INF:BANDWIDTH=16000000,RESOLUTION=3840x2160,CODECS="avc1.640033,mp4a.40.2"',
+    'v/2160/index.m3u8',
+    '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+    'v/1080/index.m3u8',
+    ''
+].join('\n');
 const MEDIA = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n#EXT-X-ENDLIST\n';
 
 const pages = {
@@ -93,6 +102,10 @@ const server = http.createServer((req, res) => {
     if (path === '/subbed/master.m3u8') {
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         return res.end(SUBBED_MASTER);
+    }
+    if (path === '/uhd/master.m3u8') {
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        return res.end(UHD_H264_MASTER);
     }
     if (/^\/v\/\d+\/index\.m3u8$/.test(path)) return res.end(MEDIA);
     // Referer-sensitive pair: one CDN that refuses any Referer, one that
@@ -182,6 +195,14 @@ test('a direct playlist URL with a query string is recognised and its qualities 
     assert.strictEqual(videos[0].source, 'direct');
     assert.deepStrictEqual(videos[0].qualities.map(q => q.label), ['720p', '360p']);
     assert.strictEqual(videos[0].resolution, '720p');
+});
+
+test('a 4K H.264 variant is listed but marked as not for Chromecast', async () => {
+    const { videos } = await findStreams(`${base}/uhd/master.m3u8`, noBrowser);
+    assert.deepStrictEqual(
+        videos[0].qualities.map(q => [q.label, q.chromecast]),
+        [['2160p', false], ['1080p', true]]
+    );
 });
 
 test('an extensionless URL is identified by sniffing the response', async () => {

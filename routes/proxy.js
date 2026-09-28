@@ -25,8 +25,10 @@ const {
     rewritePlaylist,
     buildProxyUrl,
     shouldSendReferer,
-    noteRefererRejected
+    noteRefererRejected,
+    isReceiverDecodable
 } = require('../lib/proxy');
+const transcoder = require('../lib/transcode');
 const { getBufferHealthStats } = require('../lib/stats');
 const { rewriteMpd, describeMpd, dashSegmentUrl, upstreamFromDashPath } = require('../lib/dash');
 const { toWebVtt } = require('../lib/subtitles');
@@ -100,7 +102,26 @@ const MAX_CACHE_SIZE = 100;
 // the same promise instead.
 const inFlightPlaylistFetches = new Map();
 
-function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer) {
+// With `transcode` set, a master whose kept variant a Chromecast can't decode
+// (4K H.264) declares HEVC and marks that variant's playlist for conversion; a
+// media playlist marked that way points its segments at converted copies.
+function planTranscode(m3u8, quality) {
+    if (/#EXT-X-STREAM-INF/i.test(m3u8)) {
+        // Only a single kept variant: 'auto' leaves the choice to the receiver.
+        if (quality === 'auto') return null;
+        const inf = m3u8.match(/#EXT-X-STREAM-INF:[^\n]*/i)[0];
+        const codecs = inf.match(/CODECS="([^"]*)"/i)?.[1] || '';
+        const height = parseInt(inf.match(/RESOLUTION=\d+x(\d+)/i)?.[1] || '0', 10);
+        return isReceiverDecodable({ codecs, height }) ? null : 'master';
+    }
+    if (!transcoder.canConvertMediaPlaylist(m3u8)) {
+        console.warn('[Transcode] Segments are fMP4 or encrypted — cannot convert, passing through');
+        return null;
+    }
+    return 'media';
+}
+
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode) {
     if (inFlightPlaylistFetches.has(cacheKey)) {
         return inFlightPlaylistFetches.get(cacheKey);
     }
@@ -128,19 +149,32 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer) 
 
         const originalM3u8 = Buffer.concat(chunks).toString('utf8');
         const baseUrl = new URL(url);
-        const filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
+        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality);
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
+        const plan = transcode ? planTranscode(filteredM3u8, quality) : null;
+        if (plan === 'master') filteredM3u8 = transcoder.declareHevc(filteredM3u8);
 
         // Carry quality onto child playlist requests so variant and segment
         // fetches stay consistent (and cache cleanly), and flag child playlists
         // so extensionless ones are still rewritten when they come back through.
-        const rewrittenM3u8 = rewritePlaylist(filteredM3u8, baseUrl, (childUrl, isPlaylist) =>
-            buildProxyUrl(req.headers.host, {
+        // Conversion follows the video variant and its segments, not separate
+        // audio or subtitle renditions (tag URIs).
+        const segmentUrls = [];
+        let rewrittenM3u8 = rewritePlaylist(filteredM3u8, baseUrl, (childUrl, isPlaylist, isTagUri) => {
+            if (plan === 'media' && !isPlaylist && !isTagUri) segmentUrls.push(childUrl);
+            return buildProxyUrl(req.headers.host, {
                 url: childUrl,
                 referer,
                 quality,
-                type: isPlaylist ? 'hls' : undefined
-            }));
+                type: isPlaylist ? 'hls' : undefined,
+                transcode: plan && !isTagUri ? 'hevc' : undefined
+            });
+        });
+        if (plan === 'media') {
+            transcoder.noteVariant(url, segmentUrls);
+            rewrittenM3u8 = transcoder.addInitMap(rewrittenM3u8,
+                buildProxyUrl(req.headers.host, { url, referer, quality, transcode: 'hevc', part: 'init' }));
+        }
 
         playlistCache.set(cacheKey, {
             content: rewrittenM3u8,
@@ -474,6 +508,66 @@ async function serveImage(res, { url, headers }) {
     return res.send(Buffer.from(response.data));
 }
 
+// --- Converted (HEVC) segments, see lib/transcode.js ---
+
+// The source bytes of a segment to convert, fetched like any proxied request
+// (Referer handling, pinned DNS).
+function segmentFetcher(headers) {
+    return async (segmentUrl) => {
+        const response = await fetchUpstream(segmentUrl, headers, {
+            method: 'get',
+            responseType: 'arraybuffer',
+            httpAgent: httpAgent,
+            httpsAgent: httpsAgent,
+            timeout: 15000,
+            maxContentLength: 64 * 1024 * 1024
+        });
+        return Buffer.from(response.data);
+    };
+}
+
+async function serveConvertedInit(res, { url, headers }) {
+    try {
+        const init = await transcoder.getInit(url, segmentFetcher(headers));
+        res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'max-age=3600' });
+        return res.send(init);
+    } catch (e) {
+        console.error(`[Transcode] Init section failed: ${e.message}`);
+        return res.status(502).json({ error: 'Conversion failed: ' + e.message });
+    }
+}
+
+async function serveConvertedSegment(res, { url, headers, deviceIp, stats }) {
+    // Validated above, like every proxied URL; segments listed in a converted
+    // playlist are the only ones the receiver asks for.
+    let media;
+    try {
+        media = await transcoder.getSegment(url, segmentFetcher(headers));
+    } catch (e) {
+        console.error(`[Transcode] Segment failed: ${e.message}`);
+        return res.status(502).json({ error: 'Conversion failed: ' + e.message });
+    }
+
+    stats.segmentCount++;
+    stats.totalBytes += media.length;
+    const duration = (Date.now() - stats.startTime) / 1000;
+    broadcast({
+        type: 'streamStats',
+        deviceIp,
+        bufferHealth: getBufferHealthStats(deviceIp),
+        stats: {
+            ...stats,
+            totalMB: (stats.totalBytes / (1024 * 1024)).toFixed(2),
+            transferRate: duration > 0 ? Math.round((stats.totalBytes / duration) / 1024) : 0,
+            duration: Math.round(duration),
+            delay: playbackTracking.get(deviceIp)?.lastDelay || 0
+        }
+    });
+
+    res.set('Content-Type', 'video/mp4');
+    return res.send(media);
+}
+
 // --- API: Proxy Stream ---
 router.get('/proxy', proxyLimiter, async (req, res) => {
     const { url, referer } = req.query;
@@ -526,14 +620,23 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             return await serveDashManifest(req, res, { url, referer, quality, headers, stats });
         }
 
+        const transcode = req.query.transcode === 'hevc' && transcoder.isAvailable() ? 'hevc' : undefined;
+        if (transcode && req.query.part === 'init') {
+            return await serveConvertedInit(res, { url, headers });
+        }
+
         const isPlaylist = req.query.type === 'hls' || url.includes('.m3u8') || url.includes('playlist');
         const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : '';
+
+        if (transcode && !isPlaylist) {
+            return await serveConvertedSegment(res, { url, headers, deviceIp, stats });
+        }
 
         // HLS Playlist - Check cache first
         if (isPlaylist) {
             // Quality is part of the key: the same upstream master URL yields
             // different rewritten playlists per requested quality.
-            const cacheKey = `${url}|q=${quality}`;
+            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}`;
             const cached = playlistCache.get(cacheKey);
 
             const cacheTTL = cached?.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
@@ -554,7 +657,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer);
+            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode);
 
             if (!result.ok) {
                 console.error(`[Proxy] Upstream returned ${result.status} for ${url}`);

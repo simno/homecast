@@ -3,6 +3,7 @@ const { activeSessions, activeAirPlaySessions, streamStats, playbackTracking, de
 const { castToDevice, stopCasting, controlPlayback } = require('../lib/cast');
 const { castToAirPlayDevice, stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
+const { isAvailable: isTranscodeAvailable } = require('../lib/transcode');
 
 const router = express.Router();
 
@@ -85,7 +86,10 @@ router.post('/api/cast', (req, res) => {
         return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
     }
 
-    castToDevice(ip, url, !!proxy, referer || '', quality, res, type, subtitle);
+    // Convert a variant the Chromecast can't decode to HEVC as it's proxied
+    // (lib/transcode.js); needs the proxy and a working hardware encoder.
+    const transcode = req.body.transcode === true && !!proxy && isTranscodeAvailable();
+    castToDevice(ip, url, !!proxy, referer || '', quality, res, type, subtitle, transcode);
 });
 
 // --- API: Get Session State ---

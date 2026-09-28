@@ -62,8 +62,10 @@ export function checkReady() {
     castBtn.disabled = !(selectedDeviceIp() && selectedStream() && subtitleChoiceReady());
 }
 
-// The device changed: re-check, and re-offer subtitles for what it can show.
+// The device changed: re-check, and re-offer qualities and subtitles for what
+// it can show.
 export function onDeviceChanged() {
+    populateQualityOptions(selectedStream(), { keep: true });
     populateSubtitleOptions(selectedStream(), selectedDeviceType());
     checkReady();
 }
@@ -307,8 +309,13 @@ function selectStream(video) {
 // Build the quality dropdown for a stream. Defaults to "Highest available";
 // the server forces that variant unless the user picks a specific quality
 // (or "Auto" for adaptive bitrate). Hidden for progressive files (MP4 etc.),
-// which have no selectable variants.
-function populateQualityOptions(video) {
+// which have no selectable variants. A Chromecast can't decode some variants
+// (4K H.264): it loads them, plays a couple of segments, then stops. For a
+// Chromecast those are offered only when the server can convert them to HEVC
+// on the way through, and say so. `keep`: hold on to the current choice if
+// still offered.
+function populateQualityOptions(video, { keep = false } = {}) {
+    const previous = keep ? qualitySelect.value : 'highest';
     qualitySelect.innerHTML = '';
 
     if (!video || (video.type !== 'hls' && video.type !== 'dash')) {
@@ -316,18 +323,24 @@ function populateQualityOptions(video) {
         return;
     }
 
-    const addOption = (value, label) => {
+    const addOption = (value, label, transcode = false) => {
         const opt = document.createElement('option');
         opt.value = value;
         opt.textContent = label;
+        if (transcode) opt.dataset.transcode = 'hevc';
         qualitySelect.appendChild(opt);
     };
 
     addOption('highest', 'Highest available');
-    (video.qualities || []).forEach(q => addOption(q.value, q.label));
+    const isChromecast = selectedDeviceType() !== 'airplay';
+    (video.qualities || []).forEach(q => {
+        if (!isChromecast || q.chromecast !== false) addOption(q.value, q.label);
+        else if (q.convertible) addOption(q.value, `${q.label} (converted, 4K Chromecasts)`, true);
+    });
     addOption('auto', 'Auto (adaptive)');
 
-    qualitySelect.value = 'highest';
+    const kept = [...qualitySelect.options].some(o => o.value === previous);
+    qualitySelect.value = kept ? previous : 'highest';
     qualitySelectRow.classList.remove('hidden');
 }
 
@@ -387,7 +400,9 @@ export async function startCasting() {
     const stream = selectedStream();
     if (!ip || !stream) return;
 
-    const quality = qualitySelectRow.classList.contains('hidden') ? 'highest' : qualitySelect.value;
+    const qualityHidden = qualitySelectRow.classList.contains('hidden');
+    const quality = qualityHidden ? 'highest' : qualitySelect.value;
+    const transcode = !qualityHidden && qualitySelect.selectedOptions[0]?.dataset.transcode === 'hevc';
 
     await performCast({
         ip,
@@ -396,6 +411,7 @@ export async function startCasting() {
         referer: stream.referer,
         deviceType: selectedDeviceType(),
         quality,
+        transcode,
         type: stream.type,
         subtitle: selectedSubtitle()
     }, {
