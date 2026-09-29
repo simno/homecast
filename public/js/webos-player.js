@@ -49,7 +49,6 @@
             fullscreen: !!document.fullscreenElement
         });
     }
-
     function connect() {
         ws = new WebSocket(`ws://${window.location.host}`);
         ws.onopen = () => {
@@ -80,6 +79,15 @@
         video.currentTime = Math.min(Math.max(time, start), Math.max(start, end - 1));
     }
 
+    // Let go of the video, and with it the TV's video decoder.
+    function release() {
+        stopped = true;
+        dashPlayer?.reset();
+        dashPlayer = null;
+        video.removeAttribute('src');
+        video.load();
+    }
+
     function run(action, value) {
         if (action === 'pause') video.pause();
         else if (action === 'play') video.play();
@@ -88,10 +96,7 @@
         else if (action === 'live' && video.seekable.length) {
             seekTo(video.seekable.end(video.seekable.length - 1) - LIVE_EDGE_OFFSET_S);
         } else if (action === 'stop') {
-            stopped = true;
-            dashPlayer?.reset();
-            video.removeAttribute('src');
-            video.load();
+            release();
             show('');
             ws?.close();
         }
@@ -156,6 +161,9 @@
     // HomeCast clicks the page once the video plays (the browser only allows
     // full screen after a user gesture); the remote's keys work too.
     document.addEventListener('fullscreenchange', report);
+    // Leaving the page (Back, Exit, another cast): free the decoder at once,
+    // not whenever the browser gets round to discarding the page.
+    window.addEventListener('pagehide', release);
     document.addEventListener('click', fullScreen);
     document.addEventListener('keydown', (event) => {
         fullScreen();

@@ -264,15 +264,15 @@ test('the player page gets its stream and reports playback to the dashboard', as
     }
 });
 
-test('messages for an unknown session are ignored', async () => {
+test('a page from an unknown session is told to stop, and gets nothing to play', async () => {
     const player = await openSocket();
     try {
-        player.send(JSON.stringify({ type: 'webosPlayer', session: 'nope', event: 'hello' }));
-        const reply = await Promise.race([
-            nextMessage(player, m => m.type === 'webosMedia'),
-            new Promise(resolve => setTimeout(() => resolve(null), 300))
-        ]);
-        assert.strictEqual(reply, null);
+        const replies = [];
+        player.on('message', (data) => replies.push(JSON.parse(data)));
+        player.send(JSON.stringify({ type: 'webosPlayer', session: 'old-session', event: 'hello' }));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const own = replies.filter(m => m.session === 'old-session');
+        assert.deepStrictEqual(own, [{ type: 'webosCommand', session: 'old-session', action: 'stop' }]);
     } finally {
         player.close();
     }
