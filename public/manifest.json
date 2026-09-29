@@ -1,7 +1,7 @@
 {
   "name": "HomeCast",
   "short_name": "HomeCast",
-  "description": "Self-hosted Chromecast streaming for your home network",
+  "description": "Self-hosted streaming to Chromecast, AirPlay and LG webOS devices on your home network",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1c1b1f",

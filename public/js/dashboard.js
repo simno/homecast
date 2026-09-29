@@ -7,6 +7,7 @@ import {
 import { state, HEALTH_LABELS, MAX_HISTORY, STALE_TIMEOUT } from './state.js';
 import { renderDashboardSubtitles } from './subtitles.js';
 import { renderPlayback, renderPosition } from './playback.js';
+import { protocolIcon } from './icons.js';
 
 // ===== NOTICES =====
 // Recovery progress and errors for a stream. Kept per stream so switching
@@ -55,8 +56,8 @@ export function renderDashboard() {
     const stream = state.streams.get(state.activeStreamIp);
     if (!stream) return;
 
-    const typeLabel = { airplay: ' (Apple TV)', webos: ' (LG webOS)' }[stream.deviceType] || '';
-    dashboardDeviceName.textContent = stream.deviceName + typeLabel;
+    dashboardDeviceName.innerHTML = protocolIcon(stream.deviceType, 'dashboard-device-icon');
+    dashboardDeviceName.append(stream.deviceName);
 
     updateConnectionHealthUI(stream.health);
     renderNotice(stream.notice);

@@ -3,6 +3,7 @@
 import { app, streamBar, addStreamBtn, stopBtn, stopBtnLabel } from './dom.js';
 import { state, saveState, HEALTH_LABELS } from './state.js';
 import { apiPost } from './api.js';
+import { icon, protocolIcon } from './icons.js';
 import { renderDashboard, updateConnectionHealthUI, setStreamNotice } from './dashboard.js';
 
 export function createStreamEntry(ip, deviceName, deviceType) {
@@ -107,13 +108,16 @@ export function renderStreamBar() {
 
         const name = document.createElement('span');
         name.textContent = stream.deviceName;
-        main.append(dot, name);
+        main.append(dot);
+        main.insertAdjacentHTML('beforeend', protocolIcon(stream.deviceType, 'pill-icon'));
+        main.append(name);
 
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'pill-close';
+        // The label is empty until the first click arms it ("Stop?").
         const closeLabel = document.createElement('span');
-        closeLabel.textContent = '×';
+        closeBtn.insertAdjacentHTML('beforeend', icon('close', 'pill-close-icon'));
         closeBtn.appendChild(closeLabel);
         closeBtn.title = `Stop streaming to ${stream.deviceName}`;
         closeBtn.setAttribute('aria-label', closeBtn.title);

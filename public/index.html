@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HomeCast - Stream to Chromecast</title>
+    <title>HomeCast - Stream to your TV</title>
     <link rel="preload" href="fonts/roboto-flex-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="style.css">
-    <meta name="description" content="Self-hosted streaming to your Chromecast devices">
+    <meta name="description" content="Self-hosted streaming to Chromecast, AirPlay and LG webOS devices">
 
     <!-- Favicons -->
     <link rel="icon" type="image/svg+xml" href="icon.svg">
@@ -61,15 +61,23 @@
             <!-- Compose Panel (setup mode: centered card; dashboard mode: overlay) -->
             <section id="compose-panel" class="compose-panel">
                 <div class="compose-card card">
-                    <h2 class="compose-title">Stream a video to your Chromecast</h2>
+                    <h2 class="compose-title">Stream a video to your TV</h2>
 
                     <!-- Device -->
-                    <label class="field-label" for="device-select">Device</label>
+                    <label class="field-label" id="device-label" for="device-picker-btn">Device</label>
                     <div class="device-row">
-                        <select id="device-select" aria-describedby="device-hint">
+                        <!-- The picker's state lives in this select; the listbox below draws it (devices.js). -->
+                        <select id="device-select" hidden aria-hidden="true" tabindex="-1">
                             <option value="" disabled selected>Scanning for devices…</option>
-                            <option value="manual">Enter IP Manually...</option>
+                            <option value="manual">Enter IP address…</option>
                         </select>
+                        <div class="device-picker">
+                            <button id="device-picker-btn" class="device-picker-btn" type="button"
+                                    aria-haspopup="listbox" aria-expanded="false" aria-controls="device-list"
+                                    aria-labelledby="device-label device-picker-btn"
+                                    aria-describedby="device-hint"></button>
+                            <ul id="device-list" class="device-list hidden" role="listbox" tabindex="-1" aria-labelledby="device-label"></ul>
+                        </div>
                         <button id="rescan-btn" class="icon-btn" type="button" title="Scan for devices again" aria-label="Scan for devices again">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <polyline points="23 4 23 10 17 10"/>
@@ -421,7 +429,7 @@
             <div class="modal-body">
                 <h3>Quick Start</h3>
                 <ol>
-                    <li>Select your Chromecast or Apple TV from the dropdown</li>
+                    <li>Pick a Chromecast, AirPlay device or LG TV from the device list</li>
                     <li>Paste a video URL or a webpage containing a video (it's analyzed straight away)</li>
                     <li>Click "Start Casting" to begin playback</li>
                     <li>Pause, skip and change the volume from the dashboard</li>
@@ -433,7 +441,7 @@
                     <li><strong>Recent:</strong> Videos you've cast are listed under the URL field. Click one to analyze it again.</li>
                     <li><strong>Stopping:</strong> Stop and the × on a stream ask you to click again to confirm, so a stray click doesn't end playback.</li>
                     <li><strong>Subtitles:</strong> Subtitles found with a video can be picked before casting, or add a WebVTT/SRT file by URL. On a Chromecast you can switch them or turn them off while playing; on Apple TV, use the TV remote.</li>
-                    <li><strong>Manual IP:</strong> If your device isn't found, select "Enter IP Manually" and enter the Chromecast's IP address.</li>
+                    <li><strong>Manual IP:</strong> If your device isn't found, choose "Enter IP address…" at the bottom of the device list and type its IP address.</li>
                     <li><strong>Supported Formats:</strong> MP4, WebM, HLS (m3u8), and many streaming services.</li>
                 </ul>
 
