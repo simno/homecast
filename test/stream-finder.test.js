@@ -312,6 +312,18 @@ test('a bot-blocked page (403) goes to the browser instead of failing', async ()
     assert.strictEqual(videos[0].type, 'mp4');
 });
 
+test('a stream the browser saw but that refuses us is reported as such, not as missing', async () => {
+    const browser = async () => [{ url: `${base}/refused.m3u8`, referer: `${base}/embed/inner.html` }];
+    const err = await expectFinderError(findStreams(`${base}/pages/nothing.html`, { browser }), 502);
+    assert.match(err.message, /only serves it to the browser/);
+});
+
+test('a browser result that is simply gone is still no video found', async () => {
+    const browser = async () => [{ url: `${base}/media/dead.mp4` }];
+    const err = await expectFinderError(findStreams(`${base}/pages/nothing.html`, { browser }), 404);
+    assert.match(err.message, /No video found/);
+});
+
 test('the browser is not started when the static pass found a stream', async () => {
     const browser = async () => assert.fail('browser should not run');
     await findStreams(`${base}/pages/json.html`, { browser });
