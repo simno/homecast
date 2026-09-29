@@ -246,6 +246,7 @@ body {
 }
 
 .logo { color: var(--md-primary); }
+.logo-dot { fill: var(--md-on-surface); }
 
 .top-bar-meta {
   display: flex;
