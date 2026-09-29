@@ -407,6 +407,7 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page, de
             : state.devices.find(d => d.ip === params.ip)?.type || params.deviceType;
         createStreamEntry(params.ip, findDeviceName(params.ip), deviceType);
         if (data.subtitles) state.streams.get(params.ip).subtitles = data.subtitles;
+        if (data.volume) state.streams.get(params.ip).volume = data.volume;
         state.activeStreamIp = params.ip;
         renderStreamBar();
         closeComposeOverlay();

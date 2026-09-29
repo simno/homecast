@@ -156,7 +156,7 @@ router.get('/api/session/:ip', async (req, res) => {
             type: 'webos',
             stats: streamStats.get(ip) || null,
             startTime: webOsSession.startTime,
-            volume: await webOsVolume(ip)
+            volume: webOsSession.volume || await webOsVolume(ip)
         });
     }
 

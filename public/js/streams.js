@@ -24,7 +24,7 @@ export function createStreamEntry(ip, deviceName, deviceType) {
         liveRange: null,            // { start, end, moving, at }: a live stream's seekable window
         live: false,
         ended: false,               // a live broadcast that has since finished
-        volume: null,               // { level, muted }, Chromecast only
+        volume: null,               // { level, muted }, Chromecast and webOS
         subtitles: { tracks: [], activeTrackId: null },
         lastStatsAt: Date.now()
     });
