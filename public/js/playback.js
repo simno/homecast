@@ -14,6 +14,10 @@ const VOLUME_DEBOUNCE_MS = 150;
 const GO_LIVE_THRESHOLD_S = 60;
 // The server keeps seeks this far short of the live edge (LIVE_EDGE_OFFSET).
 const LIVE_EDGE_OFFSET_S = 15;
+// A live window with less room than this to seek in gets no timeline or skip
+// back. Rolling playlists that keep only a few segments leave a second or two
+// short of the edge, and a seek there only makes the player rebuffer.
+const MIN_LIVE_SCRUB_S = 30;
 
 function formatTime(seconds) {
     const s = Math.max(0, Math.floor(seconds));
@@ -231,11 +235,19 @@ function timelineWindow(stream) {
     return null;
 }
 
+// The furthest a seek may go: short of the edge while the stream is live.
+function latestSeekable(stream, win) {
+    return stream.liveRange && !stream.ended ? Math.max(win.start, win.end - LIVE_EDGE_OFFSET_S) : win.end;
+}
+
 function renderTimeline(stream) {
     const el = playback.timeline;
     const win = timelineWindow(stream);
-    const usable = win && stream.position && win.end - win.start > 1;
+    const scrubbable = win && win.end - win.start > 1 &&
+        (!win.live || latestSeekable(stream, win) - win.start >= MIN_LIVE_SCRUB_S);
+    const usable = scrubbable && stream.position;
     el.classList.toggle('hidden', !usable);
+    playback.seekBack.classList.toggle('hidden', Boolean(win?.live) && !scrubbable);
     if (!usable || dragging) return;
 
     const current = Math.min(Math.max(currentPosition(stream, stream.playerState), win.start), win.end);
@@ -332,8 +344,7 @@ function wireTimeline() {
 // Jump to `time`, showing the new position straight away; the device's
 // status report confirms it.
 async function seekTo(stream, win, time) {
-    const latest = stream.liveRange && !stream.ended ? Math.max(win.start, win.end - LIVE_EDGE_OFFSET_S) : win.end;
-    const target = Math.min(Math.max(time, win.start), latest);
+    const target = Math.min(Math.max(time, win.start), latestSeekable(stream, win));
     const previous = stream.position;
     stream.position = { ...stream.position, currentTime: target, at: Date.now() };
     if (win.live) stream.currentDelay = Math.max(0, win.end - target);
