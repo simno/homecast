@@ -126,6 +126,12 @@ test('"highest" keeps one decodable video rendition and all audio', () => {
     assert.ok(out.includes('id="a1"'));
 });
 
+test('"highest" keeps 4K H.264 for a receiver that plays every rendition (an LG TV)', () => {
+    const out = dash.rewriteMpd(mpd(), MPD_URL, { quality: 'highest', convertible: true, toSegmentUrl, toManifestUrl });
+    assert.ok(out.includes('id="v2160"'));
+    assert.ok(!out.includes('id="v1080"'));
+});
+
 test('an explicit height and "auto" are honoured', () => {
     const out360 = rewrite(mpd(), '360');
     assert.ok(out360.includes('id="v360"') && !out360.includes('id="v1080"'));

@@ -106,6 +106,7 @@ export default [
             'node_modules/**',
             'coverage/**',
             'dist/**',
+            'public/vendor/**',
             '*.min.js',
             'eslint.config.js',
             'eslint.config.mjs'

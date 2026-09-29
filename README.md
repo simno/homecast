@@ -41,7 +41,7 @@ sources from webpages and serves them to your devices in a compatible format.
 - 🎯 **Smart Extraction** — Finds the stream behind a webpage: player markup, embedded JSON, iframe chains, player scripts, and a headless-browser fallback that watches the page's network traffic
 - 📺 **Twitch** — Live channels and VODs resolved to castable HLS
 - 💬 **Subtitles** — Picks up subtitles from the page and from HLS/DASH manifests, or casts a WebVTT/SRT file by URL; switch or turn them off while playing
-- 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast; Apple TV takes HLS and MP4)
+- 🌐 **HLS & DASH** — Live and on-demand, with a quality picker (DASH plays on Chromecast and LG TVs; Apple TV takes HLS and MP4)
 - 🎞️ **4K on Chromecast** — 4K H.264 streams (X/Periscope broadcasts) converted to HEVC on the fly with an Intel, AMD or NVIDIA GPU, so 4K Chromecasts and Cast TVs can play them. See [4K on Chromecast](#4k-on-chromecast-hevc-conversion)
 - 🔴 **Live Streams** — Start near the live edge, with a timeline to go back and a Go live button to catch up
 - 🎮 **Remote Control** — Pause, skip, seek on the timeline and set the volume from the dashboard (volume on Chromecast; Apple TV uses its remote)
@@ -211,7 +211,8 @@ The server log says why each is skipped (`no AirPlay 1 video`).
 ### LG TVs (webOS)
 
 LG TVs show up as **· LG webOS** in the device list. An LG TV with Chromecast built in on the same address
-appears twice, **· Cast** and **· LG webOS**: pick either.
+appears twice, **· Cast** and **· LG webOS**: pick either. With the Cast one picked, a stream offering 4K H.264 gets a
+note under Quality with a switch to LG webOS, which plays it without conversion.
 
 Casting to **· LG webOS** opens HomeCast's player in the TV's own web browser, full screen. The TV decodes the stream
 itself, so 4K H.264 plays as it is: no [conversion](#4k-on-chromecast-hevc-conversion), no GPU, and no quality lost to
@@ -230,7 +231,8 @@ work on the TV too. Stop (or a video playing to its end) returns the TV to the i
   the header as it passes through: no re-encoding, and no FFmpeg needed.
 - **Subtitles** are chosen when casting (a separate file, or a language from the stream); they can't be switched from
   the dashboard during playback.
-- DASH streams can't be cast this way; cast them to a Chromecast.
+- **DASH** plays through [dash.js](https://github.com/Dash-Industry-Forum/dash.js), which the player page loads only
+  for DASH streams (4K H.264 included). DRM-protected DASH can't be played.
 
 ### Supported Sources
 

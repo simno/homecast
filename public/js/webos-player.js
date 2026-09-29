@@ -17,6 +17,8 @@
 
     let ws = null;
     let stopped = false;
+    let loaded = false;
+    let dashPlayer = null;
 
     function show(text) {
         message.textContent = text || '';
@@ -87,6 +89,7 @@
             seekTo(video.seekable.end(video.seekable.length - 1) - LIVE_EDGE_OFFSET_S);
         } else if (action === 'stop') {
             stopped = true;
+            dashPlayer?.reset();
             video.removeAttribute('src');
             video.load();
             show('');
@@ -106,8 +109,9 @@
 
     // What to play, from HomeCast when the page checks in (again after a
     // reconnect, when it's already playing).
-    function load({ src, sub, subLang }) {
-        if (video.getAttribute('src') || stopped) return;
+    function load({ src, dash, sub, subLang }) {
+        if (loaded || stopped) return;
+        loaded = true;
         if (sub) {
             const track = document.createElement('track');
             track.kind = 'subtitles';
@@ -119,7 +123,28 @@
             video.textTracks.addEventListener('addtrack', () => showSubtitleLanguage(subLang));
             video.addEventListener('loadedmetadata', () => showSubtitleLanguage(subLang));
         }
-        video.src = src;
+        if (dash) playDash(src);
+        else video.src = src;
+    }
+
+    // DASH through dash.js (vendor/dash.all.min.js), loaded only when needed:
+    // the TV's browser plays HLS and MP4 natively, but not DASH.
+    function playDash(src) {
+        const script = document.createElement('script');
+        script.src = 'vendor/dash.all.min.js';
+        script.onload = () => {
+            if (stopped) return;
+            const dashjs = window.dashjs;
+            dashPlayer = dashjs.MediaPlayer().create();
+            dashPlayer.on(dashjs.MediaPlayer.events.ERROR, (event) => {
+                const reason = event.error?.message || 'the DASH player failed';
+                show(`This stream can't be played here: ${reason}.`);
+                send('status', { error: reason });
+            });
+            dashPlayer.initialize(video, src, true);
+        };
+        script.onerror = () => send('status', { error: 'the DASH player could not be loaded' });
+        document.head.appendChild(script);
     }
 
     function fullScreen() {

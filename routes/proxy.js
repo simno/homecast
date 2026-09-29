@@ -460,7 +460,7 @@ async function serveTimedSegment(res, response, context) {
 }
 
 // Fetch an MPD and hand the receiver a copy whose every URL points back at us.
-async function serveDashManifest(req, res, { url, referer, quality, headers, stats }) {
+async function serveDashManifest(req, res, { url, referer, quality, headers, stats, device }) {
     const response = await fetchUpstream(url, headers, {
         method: 'get',
         responseType: 'text',
@@ -482,8 +482,10 @@ async function serveDashManifest(req, res, { url, referer, quality, headers, sta
     const host = req.headers.host;
     const rewritten = rewriteMpd(response.data, mpdUrl, {
         quality,
+        // An LG TV decodes 4K H.264 itself: nothing needs filtering out for it.
+        convertible: device === 'webos',
         toSegmentUrl: (segmentUrl) => dashSegmentUrl(host, segmentUrl, referer),
-        toManifestUrl: (manifestUrl) => buildProxyUrl(host, { url: manifestUrl, referer, quality, type: 'dash' })
+        toManifestUrl: (manifestUrl) => buildProxyUrl(host, { url: manifestUrl, referer, quality, type: 'dash', device })
     });
     if (!rewritten) {
         return res.status(502).json({ error: 'Upstream did not return a DASH manifest' });
@@ -727,7 +729,8 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         // parent manifest, and covers manifests whose URL doesn't say so.
         const isDash = req.query.type === 'dash' || (req.query.type !== 'hls' && /\.mpd(?:$|[?;])/i.test(url));
         if (isDash) {
-            return await serveDashManifest(req, res, { url, referer, quality, headers, stats });
+            const device = req.query.device === 'webos' ? 'webos' : undefined;
+            return await serveDashManifest(req, res, { url, referer, quality, headers, stats, device });
         }
 
         const transcode = req.query.transcode === 'hevc' && transcoder.isAvailable() ? 'hevc' : undefined;

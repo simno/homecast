@@ -88,12 +88,10 @@ router.post('/api/cast', (req, res) => {
         return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
     }
 
-    // LG TVs play in their own browser, which has no DASH player of its own.
+    // LG TVs play in their own browser (DASH through dash.js on the player page).
     if (deviceType === 'webos' || devices.get(ip)?.type === 'webos') {
-        if (type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url))) {
-            return res.status(400).json({ error: 'LG TVs cannot play DASH streams this way. Cast this one to a Chromecast, or pick an HLS or MP4 stream.' });
-        }
-        return castToWebOsDevice(ip, url, referer || '', quality, res, type, subtitle);
+        const isDash = type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url));
+        return castToWebOsDevice(ip, url, referer || '', quality, res, isDash ? 'dash' : type, subtitle);
     }
 
     // Convert a variant the Chromecast can't decode to HEVC as it's proxied

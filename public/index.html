@@ -129,7 +129,11 @@
                             <div id="stream-options"></div>
                             <div id="quality-select-row" class="quality-row hidden">
                                 <label class="field-label" for="quality-select">Quality</label>
-                                <select id="quality-select" aria-label="Stream quality"></select>
+                                <select id="quality-select" aria-label="Stream quality" aria-describedby="quality-note"></select>
+                                <div id="quality-note" class="field-note hidden">
+                                    <span id="quality-note-text"></span>
+                                    <button id="quality-note-switch" class="link-btn" type="button">Use LG webOS</button>
+                                </div>
                             </div>
                             <div id="subtitle-select-row" class="quality-row hidden">
                                 <label class="field-label" for="subtitle-select">Subtitles</label>

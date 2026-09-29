@@ -45,6 +45,17 @@ const SEGMENT = makeMislabelledSegment();
 // Several chunks long, so it is still arriving when the proxy looks at its start.
 const NOT_TS = Buffer.from(Array.from({ length: 3 * 1024 * 1024 }, (_, i) => (i * 7) % 256));
 
+const MPD = `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT10M">
+  <Period id="1">
+    <AdaptationSet contentType="video" mimeType="video/mp4" segmentAlignment="true">
+      <SegmentTemplate media="$RepresentationID$/$Number$.m4s" initialization="$RepresentationID$/init.mp4" duration="4" timescale="1"/>
+      <Representation id="v2160" codecs="avc1.640033" bandwidth="15000000" width="3840" height="2160"/>
+      <Representation id="v1080" codecs="avc1.640028" bandwidth="8000000" width="1920" height="1080"/>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+
 let base;
 let cdn;
 
@@ -62,6 +73,10 @@ const upstream = http.createServer((req, res) => {
     if (path === '/show/chunk/42' && SEGMENT) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         return res.end(SEGMENT);
+    }
+    if (path === '/show/manifest.mpd') {
+        res.writeHead(200, { 'Content-Type': 'application/dash+xml' });
+        return res.end(MPD);
     }
     if (path === '/show/clip.mp4') {
         res.writeHead(200, { 'Content-Type': 'video/mp4' });
@@ -141,6 +156,24 @@ test('keeps the 4K H.264 variant for an LG TV and flags its child requests', asy
     assert.doesNotMatch(body, /RESOLUTION=1920x1080/);
     const child = body.split('\n').find(l => l.startsWith('http'));
     assert.match(child, /&device=webos$/);
+});
+
+test('keeps the 4K H.264 rendition of a DASH stream for an LG TV', async () => {
+    const lg = await (await fetch(proxyUrl(`${cdn}/show/manifest.mpd`, '&type=dash&device=webos'))).text();
+    assert.match(lg, /id="v2160"/);
+    assert.doesNotMatch(lg, /id="v1080"/);
+    const cast = await (await fetch(proxyUrl(`${cdn}/show/manifest.mpd`, '&type=dash'))).text();
+    assert.match(cast, /id="v1080"/);
+    assert.doesNotMatch(cast, /id="v2160"/);
+});
+
+test('the player page may play Media Source blobs (dash.js)', async () => {
+    const res = await fetch(`${base}/webos-player.html`);
+    await res.text();
+    assert.match(res.headers.get('content-security-policy'), /media-src 'self' blob:/);
+    const script = await fetch(`${base}/vendor/dash.all.min.js`);
+    await script.arrayBuffer();
+    assert.strictEqual(script.status, 200);
 });
 
 test('still skips 4K H.264 for a Chromecast', async () => {

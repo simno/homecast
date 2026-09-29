@@ -3,7 +3,8 @@
 import {
     composePanel, composeOverlay, videoUrlInput, analyzeBtn, analyzeBtnLabel,
     resolvedUrlContainer, streamsFoundText, streamOptionsContainer,
-    qualitySelectRow, qualitySelect, useProxyCheckbox, castBtn, castBtnLabel, statusCard,
+    qualitySelectRow, qualitySelect, qualityNote, qualityNoteText, qualityNoteSwitch, deviceSelect,
+    useProxyCheckbox, castBtn, castBtnLabel, statusCard,
     videoPreview, videoPreviewImg, videoPreviewTitle, videoPreviewHost
 } from './dom.js';
 import { state, saveState } from './state.js';
@@ -348,7 +349,26 @@ function populateQualityOptions(video, { keep = false } = {}) {
     const kept = [...qualitySelect.options].some(o => o.value === previous);
     qualitySelect.value = kept ? previous : 'highest';
     qualitySelectRow.classList.remove('hidden');
+    renderQualityNote(video);
 }
+
+// An LG TV picked by its Cast receiver, for a stream with 4K H.264: over Cast
+// that's converted (or plays at 1080p), while the TV's own browser plays it
+// as it is. Say so, with a switch to the LG webOS option.
+function renderQualityNote(video) {
+    const device = state.devices.find(d => d.ip === selectedDeviceIp());
+    const has4kH264 = (video?.qualities || []).some(q => q.chromecast === false);
+    const offer = selectedDeviceType() === 'chromecast' && device?.webos && has4kH264;
+    qualityNote.classList.toggle('hidden', !offer);
+    if (offer) qualityNoteText.textContent = `${device.name} can also play the 4K stream as it is, without conversion.`;
+}
+
+qualityNoteSwitch.addEventListener('click', () => {
+    const ip = selectedDeviceIp();
+    if (!ip) return;
+    deviceSelect.value = `webos:${ip}`;
+    deviceSelect.dispatchEvent(new window.Event('change'));
+});
 
 // ===== CASTING =====
 

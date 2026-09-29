@@ -84,6 +84,9 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'"],
             fontSrc: ["'self'"],
             connectSrc: ["'self'", 'ws:', 'wss:'],
+            // The LG player page plays DASH through dash.js, which feeds the
+            // video element a Media Source blob.
+            mediaSrc: ["'self'", 'blob:'],
             imgSrc: ["'self'", 'data:'],
             frameAncestors: ["'none'"],
             upgradeInsecureRequests: null // Disable: HomeCast serves over HTTP on local network
