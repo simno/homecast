@@ -186,7 +186,8 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
         if (cache) playlistCache.set(cacheKey, {
             content: rewrittenM3u8,
             timestamp: Date.now(),
-            isLive: isLive
+            isLive: isLive,
+            ttl: playlistTtl(filteredM3u8, isLive)
         });
 
         return { ok: true, filteredM3u8, rewrittenM3u8, isLive };
@@ -197,13 +198,22 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
     return promise;
 }
 
+// A live media playlist gains a segment every target duration, so caching it
+// any longer than that hides the newest segments: a receiver playing near the
+// live edge (Twitch uses 2s segments) then runs dry and stalls. Cap the live
+// TTL at half the target duration so a refresh always sees fresh segments.
+function playlistTtl(m3u8, isLive) {
+    if (!isLive) return CACHE_TTL_VOD;
+    const target = m3u8.match(/#EXT-X-TARGETDURATION:\s*([\d.]+)/);
+    return target ? Math.min(CACHE_TTL_LIVE, parseFloat(target[1]) * 500) : CACHE_TTL_LIVE;
+}
+
 // Clean up expired and excess playlist cache entries every 2 minutes
 setInterval(() => {
     const now = Date.now();
     let cleaned = 0;
     for (const [key, value] of playlistCache.entries()) {
-        const ttl = value.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
-        if (now - value.timestamp > ttl) {
+        if (now - value.timestamp > value.ttl) {
             playlistCache.delete(key);
             cleaned++;
         }
@@ -753,7 +763,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}`;
             const cached = playlistCache.get(cacheKey);
 
-            const cacheTTL = cached?.isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD;
+            const cacheTTL = cached?.ttl;
 
             if (cached && (Date.now() - cached.timestamp < cacheTTL)) {
                 const age = Math.round((Date.now() - cached.timestamp) / 1000);
@@ -837,7 +847,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 }
             }
 
-            console.log(`[Proxy] Serving ${isLive ? 'LIVE' : 'VOD'} playlist (TTL: ${isLive ? CACHE_TTL_LIVE : CACHE_TTL_VOD}ms): ${url.substring(0, 80)}...`);
+            console.log(`[Proxy] Serving ${isLive ? 'LIVE' : 'VOD'} playlist (TTL: ${playlistTtl(filteredM3u8, isLive)}ms): ${url.substring(0, 80)}...`);
 
             res.set('Content-Type', contentType);
             return res.send(rewrittenM3u8);

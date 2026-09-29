@@ -13,6 +13,7 @@ const express = require('express');
 const MASTER = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\nhi.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360\nlo.m3u8\n';
 const VOD = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n#EXT-X-ENDLIST\n';
 const LIVE = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n';
+const LIVE_SHORT = '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nseg1.ts\n';
 
 const hits = new Map(); // upstream path -> request count
 let failNext = new Set(); // paths that answer 404 once
@@ -27,7 +28,7 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(404);
         return res.end();
     }
-    const body = path.includes('master') ? MASTER : path.includes('live') ? LIVE : VOD;
+    const body = path.includes('master') ? MASTER : path.includes('short') ? LIVE_SHORT : path.includes('live') ? LIVE : VOD;
     // A little latency, so concurrent requests really overlap.
     setTimeout(() => {
         res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
@@ -70,6 +71,17 @@ test('a live playlist is reused within its TTL and refetched after it', async ()
     await new Promise((resolve) => setTimeout(resolve, 1100));
     await get('/live-a.m3u8');
     assert.strictEqual(hits.get('/live-a.m3u8'), 2);
+});
+
+test('a live playlist with short segments is cached for at most half a segment', async () => {
+    await get('/short-a.m3u8');
+    await get('/short-a.m3u8');
+    assert.strictEqual(hits.get('/short-a.m3u8'), 1);
+
+    // 1s target duration -> 500ms TTL, under the 1s CACHE_TTL_LIVE.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await get('/short-a.m3u8');
+    assert.strictEqual(hits.get('/short-a.m3u8'), 2);
 });
 
 test('each quality of a master is cached separately', async () => {

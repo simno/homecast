@@ -392,7 +392,7 @@ Defaults suit most networks; change these only to work around a specific problem
 | `RECONNECT_DELAY_SECONDS`    | `10`    | Wait before reconnecting to a device that dropped                                    |
 | `MAX_RECONNECT_ATTEMPTS`     | `3`     | Reconnection attempts before giving up                                               |
 | `CACHE_TTL_VOD_SECONDS`      | `60`    | How long an on-demand HLS playlist is cached                                         |
-| `CACHE_TTL_LIVE_SECONDS`     | `4`     | How long a live HLS playlist is cached (keep below the segment duration)             |
+| `CACHE_TTL_LIVE_SECONDS`     | `4`     | Max time a live HLS playlist is cached (capped at half its segment target duration)  |
 
 ### Security
 
