@@ -2,7 +2,7 @@
 // are playing — on the server, whichever browser started them.
 import { refreshGraphColors } from './graphs.js';
 import {
-    videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay,
+    videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay, composeCloseBtn,
     helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote, bookmarkletLink, shareLinkFormat,
     bookmarkletCopyBtn, bookmarkletCopied, bookmarksBarKeys
 } from './dom.js';
@@ -109,6 +109,7 @@ stopBtn.addEventListener('click', () => {
 });
 addStreamBtn.addEventListener('click', () => openComposeOverlay());
 composeOverlay.querySelector('.compose-overlay-backdrop').addEventListener('click', closeComposeOverlay);
+composeCloseBtn.addEventListener('click', closeComposeOverlay);
 
 // ===== SENDING PAGES FROM ELSEWHERE =====
 // A page handed over in the address, as ?url= (the bookmarklet, shortcuts)

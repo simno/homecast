@@ -510,6 +510,31 @@ body {
   letter-spacing: -0.02em;
 }
 
+/* Only as an overlay: in setup mode the form is the page. */
+.compose-close {
+  display: none;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.compose-panel.overlay-active .compose-close { display: flex; }
+
+.compose-subtitle {
+  margin: -24px 0 28px;
+  text-align: center;
+  font: var(--typescale-body);
+  color: var(--md-on-surface-variant);
+}
+
+.compose-subtitle strong { color: var(--md-on-surface); font-weight: 500; }
+
+/* Queueing for a playing stream: its device is the only one, so no picker. */
+.compose-card.is-queue #device-label,
+.compose-card.is-queue .device-row,
+.compose-card.is-queue #device-hint,
+.compose-card.is-queue #manual-ip-container { display: none; }
+
 .field-label {
   display: block;
   font: var(--typescale-label-sm);
@@ -2080,6 +2105,8 @@ input[type="text"]:focus-visible {
   .graph-x-labels { padding-left: 48px; }
 
   .compose-card { padding: 20px; }
+
+  .compose-close { width: 40px; }
 
   .compose-title {
     font-size: 1.2rem;

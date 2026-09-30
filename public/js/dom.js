@@ -6,6 +6,10 @@ export const app = $('app');
 // Compose form
 export const composePanel = $('compose-panel');
 export const composeOverlay = $('compose-overlay');
+export const composeCard = $('compose-card');
+export const composeTitle = $('compose-title');
+export const composeSubtitle = $('compose-subtitle');
+export const composeCloseBtn = $('compose-close-btn');
 export const deviceSelect = $('device-select');
 export const devicePickerBtn = $('device-picker-btn');
 export const deviceList = $('device-list');

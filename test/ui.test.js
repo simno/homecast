@@ -225,7 +225,7 @@ test('the bookmarklet opens HomeCast with the page it was clicked on', async (t)
     assert.strictEqual(await opened.inputValue('#video-url'), `${cdn}/watch`);
 });
 
-test('a video added to Up next is listed, can be removed, and plays on Play next now', async (t) => {
+test('a queued video is listed, can be removed, and plays on Play next now', async (t) => {
     if (needBrowser(t)) return;
     await openPage();
     await pickMockDevice();
@@ -237,14 +237,28 @@ test('a video added to Up next is listed, can be removed, and plays on Play next
     const addSecondShow = async () => {
         await page.click('#queue-add-btn');
         await page.waitForSelector('#compose-overlay:not(.hidden)');
-        // Only the playing device can be picked, and the button queues.
-        assert.match(await page.textContent('#device-picker-btn'), /Mock Chromecast \(UI\)/);
-        assert.strictEqual((await page.textContent('#cast-btn-label')).trim(), 'Play next');
+        // It's for the playing device, so there's no picker, and the button queues.
+        assert.strictEqual(await page.textContent('#compose-title'), 'Queue a video');
+        assert.strictEqual(await page.textContent('#compose-subtitle'), 'Plays on Mock Chromecast (UI) after the current video.');
+        assert.strictEqual(await page.isVisible('#device-picker-btn'), false);
+        assert.strictEqual((await page.textContent('#cast-btn-label')).trim(), 'Add to queue');
         await analyze(`${cdn}/watch-2`);
         await page.click('#cast-btn');
         await page.waitForSelector('#compose-overlay.hidden', { state: 'attached' });
         await page.waitForSelector('#queue-list li');
     };
+
+    // The × closes the form without queueing anything, and a new stream's form
+    // is the ordinary one again.
+    await page.click('#queue-add-btn');
+    await page.click('#compose-close-btn');
+    await page.waitForSelector('#compose-overlay.hidden', { state: 'attached' });
+    await page.click('#add-stream-btn');
+    assert.strictEqual(await page.textContent('#compose-title'), 'Stream a video to your TV');
+    assert.strictEqual(await page.isVisible('#device-picker-btn'), true);
+    assert.strictEqual((await page.textContent('#cast-btn-label')).trim(), 'Start Casting');
+    await page.click('#compose-close-btn');
+    await page.waitForSelector('#compose-overlay.hidden', { state: 'attached' });
 
     await addSecondShow();
     assert.match(await page.textContent('#queue-list li'), /Second Show/);

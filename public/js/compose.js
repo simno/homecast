@@ -1,7 +1,7 @@
 // The compose form: analyze a URL, pick a stream, quality and subtitles, cast.
 // In setup mode it's the page; in dashboard mode it opens as an overlay.
 import {
-    composePanel, composeOverlay, videoUrlInput, analyzeBtn, analyzeBtnLabel,
+    composePanel, composeOverlay, composeCard, composeTitle, composeSubtitle, videoUrlInput, analyzeBtn, analyzeBtnLabel,
     resolvedUrlContainer, streamsFoundText, streamOptionsContainer,
     qualitySelectRow, qualitySelect, qualityNote, qualityNoteText, qualityNoteSwitch, deviceSelect,
     useProxyCheckbox, castBtn, castBtnLabel, statusCard,
@@ -46,6 +46,7 @@ export function openComposeOverlay({ queueFor = null } = {}) {
     state.compose.queueFor = queueFor;
     if (queueFor) pickOnlyDevice(queueFor, state.streams.get(queueFor)?.deviceType);
     else filterDeviceDropdown();
+    setComposeHeading();
     setCastButton({ busy: false });
     composeOverlay.classList.remove('hidden');
     composePanel.classList.add('overlay-active');
@@ -55,7 +56,21 @@ export function closeComposeOverlay() {
     composeOverlay.classList.add('hidden');
     composePanel.classList.remove('overlay-active');
     state.compose.queueFor = null;
+    setComposeHeading();
     setCastButton({ busy: false });
+}
+
+// Queueing names the device it's for and drops the picker (see style.css).
+function setComposeHeading() {
+    const ip = state.compose.queueFor;
+    composeCard.classList.toggle('is-queue', !!ip);
+    composeTitle.textContent = ip ? 'Queue a video' : 'Stream a video to your TV';
+    composeSubtitle.classList.toggle('hidden', !ip);
+    composeSubtitle.replaceChildren();
+    if (!ip) return;
+    const name = document.createElement('strong');
+    name.textContent = state.streams.get(ip)?.deviceName || findDeviceName(ip);
+    composeSubtitle.append('Plays on ', name, ' after the current video.');
 }
 
 export function isComposeOverlayOpen() {
@@ -81,7 +96,7 @@ export function onDeviceChanged() {
 }
 
 function setCastButton({ busy }) {
-    if (state.compose.queueFor) castBtnLabel.textContent = busy ? 'Adding…' : 'Play next';
+    if (state.compose.queueFor) castBtnLabel.textContent = busy ? 'Adding…' : 'Add to queue';
     else castBtnLabel.textContent = busy ? 'Casting…' : 'Start Casting';
 }
 
@@ -464,7 +479,7 @@ export async function startCasting() {
         type: stream.type,
         subtitle: selectedSubtitle()
     }, {
-        loadingMessage: state.compose.queueFor ? 'Adding to Up next…' : 'Connecting to device...',
+        loadingMessage: state.compose.queueFor ? 'Adding to the queue…' : 'Connecting to device...',
         allowPairingRetry: true,
         page: { url: videoUrlInput.value.trim(), title: state.compose.title },
         deviceKey: selectedDeviceKey(),

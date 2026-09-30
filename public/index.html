@@ -59,8 +59,10 @@
 
             <!-- Compose Panel (setup mode: centered card; dashboard mode: overlay) -->
             <section id="compose-panel" class="compose-panel">
-                <div class="compose-card card">
-                    <h2 class="compose-title">Stream a video to your TV</h2>
+                <div class="compose-card card" id="compose-card">
+                    <button id="compose-close-btn" class="modal-close compose-close" type="button" aria-label="Close">&times;</button>
+                    <h2 class="compose-title" id="compose-title">Stream a video to your TV</h2>
+                    <p class="compose-subtitle hidden" id="compose-subtitle"></p>
 
                     <!-- Device -->
                     <label class="field-label" id="device-label" for="device-picker-btn">Device</label>
@@ -287,7 +289,7 @@
                             <h3 id="queue-title" class="queue-title">Up next</h3>
                             <div class="queue-actions">
                                 <button id="queue-next-btn" class="queue-btn hidden" type="button">Play next now</button>
-                                <button id="queue-add-btn" class="queue-btn" type="button">Add a video</button>
+                                <button id="queue-add-btn" class="queue-btn" type="button">Queue a video</button>
                             </div>
                         </div>
                         <ol id="queue-list" class="queue-list"></ol>
@@ -450,7 +452,7 @@
                 <h3>Tips</h3>
                 <ul>
                     <li><strong>Proxy stream</strong> (under Advanced): Keep this on for most videos. It fixes CORS errors and enables HLS/m3u8 streaming.</li>
-                    <li><strong>Up next:</strong> While a stream plays, "Add a video" queues another for the same device. It starts when the current one ends, even with this page closed. On Apple TV, press "Play next now" instead.</li>
+                    <li><strong>Up next:</strong> While a stream plays, "Queue a video" adds another for the same device. It starts when the current one ends, even with this page closed. On Apple TV, press "Play next now" instead.</li>
                     <li><strong>Recent:</strong> Videos you've cast are listed under the URL field. Click one to analyze it again.</li>
                     <li><strong>Stopping:</strong> Stop and the × on a stream ask you to click again to confirm, so a stray click doesn't end playback.</li>
                     <li><strong>Subtitles:</strong> Subtitles found with a video can be picked before casting, or add a WebVTT/SRT file by URL. On a Chromecast you can switch them or turn them off while playing; on Apple TV, use the TV remote.</li>
