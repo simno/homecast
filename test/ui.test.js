@@ -10,6 +10,7 @@ const { test, before, after, afterEach } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const net = require('net');
+const { execFileSync } = require('child_process');
 const { chromium } = require('playwright');
 
 const MOCK_IP = '127.0.0.1';
@@ -35,6 +36,14 @@ const upstream = http.createServer((req, res) => {
     if (req.url === '/watch-2') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         return res.end(`<html><head><title>Second Show</title></head><body><video src="${cdn}/v.mp4?n=2"></video></body></html>`);
+    }
+    if (req.url === '/vod.m3u8') {
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        return res.end('#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg1.ts\n#EXT-X-ENDLIST\n');
+    }
+    if (req.url === '/seg1.ts') {
+        res.writeHead(200, { 'Content-Type': 'video/mp2t' });
+        return res.end(Buffer.alloc(1024));
     }
     if (req.url === '/subs.vtt') {
         res.writeHead(200, { 'Content-Type': 'text/vtt' });
@@ -419,5 +428,29 @@ test('a queued video the TV rejects before playing is shown as failed, not lost'
     await page.waitForSelector('#dashboard-notice:not(.hidden)', { timeout: 5000 });
     assert.strictEqual(await page.getAttribute('#app', 'data-mode'), 'dashboard');
     assert.match(await page.textContent('#dashboard-notice-text'), /decode|play/i);
+    assert.deepStrictEqual(pageErrors, []);
+});
+
+let hasX265 = false;
+try {
+    hasX265 = execFileSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }).includes('libx265');
+} catch { /* no ffmpeg */ }
+
+test('a converted stream this page didn\'t start says why it fell back to direct play', async (t) => {
+    if (needBrowser(t)) return;
+    if (!hasX265) return t.skip('ffmpeg with libx265 not installed');
+    process.env.TRANSCODE_ENCODER = 'x265';
+    await require('../lib/transcode').detect();
+    await openPage();
+    await page.waitForTimeout(1500);
+
+    // Cast from elsewhere, converted; the TV rejects it before it plays.
+    await castElsewhere({ url: `${cdn}/vod.m3u8`, type: 'hls', proxy: true, transcode: true });
+    const first = activeSessions.get(MOCK_IP).player.mockDevice;
+    first.fail({ type: 'LOAD_FAILED' });
+
+    await page.waitForSelector('#app[data-mode="dashboard"]', { timeout: 10000 });
+    await page.waitForSelector('#dashboard-notice:not(.hidden)', { timeout: 10000 });
+    assert.match(await page.textContent('#dashboard-notice-text'), /couldn.t play the converted 4K stream/);
     assert.deepStrictEqual(pageErrors, []);
 });

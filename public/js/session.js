@@ -14,6 +14,8 @@ export function applySession(stream, session) {
     if (session.subtitles) stream.subtitles = session.subtitles;
     if (session.volume) stream.volume = session.volume;
     if (session.bufferHealth) stream.bufferHealth = session.bufferHealth;
+    // What the server had to say about it, e.g. a recast without conversion.
+    if (session.notice) stream.notice = session.notice;
     // Where playback is: receivers say only when it changes, so without
     // this a page opened mid-stream has no position or timeline.
     if (session.playback?.status) {

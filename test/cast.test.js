@@ -380,6 +380,14 @@ test('a converted cast the TV rejects before playing is recast without conversio
         assert.ok(await waitFor(() => receiver() && receiver() !== first), 'recast on a new receiver session');
         assert.ok(!receiver().media.contentId.includes('transcode=hevc'), 'without conversion');
         assert.ok(!page.messages.some(m => m.type === 'castError'), 'a fallback is not reported as a failure');
+
+        // A page without this stream yet, or opened later, is told too.
+        const session = await (await fetch(`${base}/api/session/${MOCK_IP}`)).json();
+        assert.strictEqual(session.notice.type, 'warning');
+        assert.match(session.notice.message, /couldn't play the converted 4K stream/);
+        // Casting something else starts afresh.
+        await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+        assert.strictEqual((await (await fetch(`${base}/api/session/${MOCK_IP}`)).json()).notice, null);
     } finally {
         page.close();
     }

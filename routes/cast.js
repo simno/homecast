@@ -1,6 +1,6 @@
 const express = require('express');
 const { activeSessions, activeAirPlaySessions, activeWebOsSessions, streamStats, playbackTracking, devices } = require('../lib/state');
-const { stopCasting, controlPlayback, sessionPlayback } = require('../lib/cast');
+const { stopCasting, controlPlayback, sessionPlayback, sessionNotice } = require('../lib/cast');
 const { stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
 const { stopWebOsCasting, controlWebOsPlayback, webOsVolume } = require('../lib/webos');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
@@ -52,7 +52,8 @@ router.get('/api/session/:ip', async (req, res) => {
             subtitles: subtitleState(ip),
             volume: session.volume || null,
             playback,
-            bufferHealth: getBufferHealthStats(ip)
+            bufferHealth: getBufferHealthStats(ip),
+            notice: sessionNotice(ip)
         });
     }
 
