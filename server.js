@@ -19,6 +19,7 @@ const castRouter = require('./routes/cast');
 const statsRouter = require('./routes/stats');
 const proxyRouter = require('./routes/proxy');
 const airplayPairingRouter = require('./routes/airplay-pairing');
+const queueRouter = require('./routes/queue');
 
 const app = express();
 const server = http.createServer(app);
@@ -159,6 +160,7 @@ app.use(castRouter);
 app.use(statsRouter);
 app.use(proxyRouter);
 app.use(airplayPairingRouter);
+app.use(queueRouter);
 
 // Express error-handling middleware. Client errors (a stale CSRF token after
 // a restart, malformed JSON) are routine: one line, no stack trace.

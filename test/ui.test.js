@@ -32,6 +32,10 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         return res.end(`<html><head><title>Test Show</title></head><body><video src="${cdn}/v.mp4"></video></body></html>`);
     }
+    if (req.url === '/watch-2') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end(`<html><head><title>Second Show</title></head><body><video src="${cdn}/v.mp4?n=2"></video></body></html>`);
+    }
     if (req.url.startsWith('/v.mp4')) {
         res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': MP4.length });
         return res.end(MP4);
@@ -211,4 +215,47 @@ test('the bookmarklet opens HomeCast with the page it was clicked on', async (t)
     ]);
     await opened.waitForSelector('.stream-option');
     assert.strictEqual(await opened.inputValue('#video-url'), `${cdn}/watch`);
+});
+
+test('a video added to Up next is listed, can be removed, and plays on Play next now', async (t) => {
+    if (needBrowser(t)) return;
+    await openPage();
+    await pickMockDevice();
+    await analyze(`${cdn}/watch`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    assert.match(await page.textContent('#queue-note'), /Nothing queued/);
+
+    const addSecondShow = async () => {
+        await page.click('#queue-add-btn');
+        await page.waitForSelector('#compose-overlay:not(.hidden)');
+        // Only the playing device can be picked, and the button queues.
+        assert.match(await page.textContent('#device-picker-btn'), /Mock Chromecast \(UI\)/);
+        assert.strictEqual((await page.textContent('#cast-btn-label')).trim(), 'Play next');
+        await analyze(`${cdn}/watch-2`);
+        await page.click('#cast-btn');
+        await page.waitForSelector('#compose-overlay.hidden', { state: 'attached' });
+        await page.waitForSelector('#queue-list li');
+    };
+
+    await addSecondShow();
+    assert.match(await page.textContent('#queue-list li'), /Second Show/);
+    assert.strictEqual(await page.isVisible('#queue-next-btn'), true);
+
+    await page.click('#queue-list .recent-remove');
+    await page.waitForSelector('#queue-list li', { state: 'detached' });
+    assert.match(await page.textContent('#queue-note'), /Nothing queued/);
+
+    await addSecondShow();
+    await page.click('#queue-next-btn');
+    await page.waitForSelector('#queue-list li', { state: 'detached' });
+    // Cast through the proxy, so the video is the proxy URL's `url`.
+    const playing = () => {
+        const contentId = activeSessions.get(MOCK_IP)?.player.mockDevice?.media?.contentId;
+        return contentId && new URL(contentId).searchParams.get('url');
+    };
+    for (let i = 0; i < 100 && playing() !== `${cdn}/v.mp4?n=2`; i++) await page.waitForTimeout(50);
+    assert.strictEqual(playing(), `${cdn}/v.mp4?n=2`);
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    assert.deepStrictEqual(pageErrors, []);
 });

@@ -8,6 +8,7 @@ import { state, HEALTH_LABELS, MAX_HISTORY, STALE_TIMEOUT } from './state.js';
 import { renderDashboardSubtitles } from './subtitles.js';
 import { renderPlayback, renderPosition } from './playback.js';
 import { protocolIcon } from './icons.js';
+import { renderQueue, loadQueue } from './queue.js';
 
 // ===== NOTICES =====
 // Recovery progress and errors for a stream. Kept per stream so switching
@@ -72,6 +73,14 @@ export function renderDashboard() {
     renderBufferHealth(stream.bufferHealth);
 
     renderDashboardSubtitles(stream);
+
+    renderQueue(stream);
+    // Not fetched yet for this stream (a page opened mid-stream, or the next
+    // video just started): ask. Updates arrive over the WebSocket.
+    if (stream.queue === undefined) {
+        stream.queue = [];
+        loadQueue(state.activeStreamIp);
+    }
 
     // Redraw graphs from stored history
     requestAnimationFrame(() => {

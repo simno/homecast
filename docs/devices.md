@@ -31,7 +31,8 @@ with every **Allow Access** setting on the Apple TV:
 Some models need one pairing even when set to **Everyone**.
 
 **Controls.** Pause, seek and go live work from the dashboard. The volume is set with the Apple TV remote. The Apple
-TV doesn't report how far behind live it is, so **Go live** is always offered during a live stream.
+TV doesn't report how far behind live it is, so **Go live** is always offered during a live stream. It doesn't report
+when a video ends either, so videos in **Up next** start when you press **Play next now**, not by themselves.
 
 **TVs with AirPlay 2 built in** (LG, Samsung and others) aren't offered as AirPlay targets. They only play video
 over AirPlay 2's encrypted sessions, and HomeCast sends AirPlay 1 video. Most of these TVs have Chromecast built in

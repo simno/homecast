@@ -21,6 +21,7 @@ import { wireSubtitleControls } from './subtitles.js';
 import { wirePlaybackControls, applyPlayerStatus } from './playback.js';
 import { wireRecentControls } from './recent.js';
 import { connectWebSocket } from './websocket.js';
+import { wireQueueControls } from './queue.js';
 
 fetchCsrfToken();
 
@@ -71,6 +72,7 @@ wirePairingControls();
 wireSubtitleControls({ onComposeChange: checkReady });
 wirePlaybackControls();
 wireRecentControls({ onPick: () => fetchAndAnalyze({ restart: true }) });
+wireQueueControls({ onAdd: (ip) => openComposeOverlay({ queueFor: ip }) });
 
 // Proxying is on by default and tucked under Advanced; say so on the
 // collapsed section when it's been turned off.
@@ -104,7 +106,7 @@ stopBtn.addEventListener('click', () => {
         stopBtn.disabled = false;
     });
 });
-addStreamBtn.addEventListener('click', openComposeOverlay);
+addStreamBtn.addEventListener('click', () => openComposeOverlay());
 composeOverlay.querySelector('.compose-overlay-backdrop').addEventListener('click', closeComposeOverlay);
 
 // ===== SENDING PAGES FROM ELSEWHERE =====

@@ -22,7 +22,8 @@ export const state = {
     compose: {
         analyzedStreams: [],
         title: null,            // the analysed page's title
-        status: null
+        status: null,
+        queueFor: null          // a playing stream's IP, when the form queues a video for it
     },
     pairedDevices: new Set()    // IPs of known-paired devices from server
 };

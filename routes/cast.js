@@ -1,103 +1,22 @@
 const express = require('express');
 const { activeSessions, activeAirPlaySessions, activeWebOsSessions, streamStats, playbackTracking, devices } = require('../lib/state');
-const { castToDevice, stopCasting, controlPlayback, sessionPlayback } = require('../lib/cast');
-const { castToAirPlayDevice, stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
-const { castToWebOsDevice, stopWebOsCasting, controlWebOsPlayback, webOsVolume } = require('../lib/webos');
+const { stopCasting, controlPlayback, sessionPlayback } = require('../lib/cast');
+const { stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay');
+const { stopWebOsCasting, controlWebOsPlayback, webOsVolume } = require('../lib/webos');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
-const { isAvailable: isTranscodeAvailable } = require('../lib/transcode');
 const { getBufferHealthStats } = require('../lib/stats');
+const { validateIp, parseCastRequest, startCast } = require('../lib/dispatch');
+const { clearQueue } = require('../lib/queue');
 
 const router = express.Router();
 
-// IPv4 address or hostname validation
-const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
-
-function validateIp(ip) {
-    if (!ip || typeof ip !== 'string') return false;
-    if (ip === 'localhost') return true;
-    if (IP_RE.test(ip)) {
-        const parts = ip.split('.').map(Number);
-        return parts.every(p => p >= 0 && p <= 255);
-    }
-    return false;
-}
-
-// Normalize the requested quality to one the proxy understands:
-// 'highest' (default), 'auto', or a numeric height string like '1080'.
-function normalizeQuality(quality) {
-    if (quality === 'auto' || quality === 'highest') return quality;
-    const height = parseInt(quality, 10);
-    if (Number.isFinite(height) && height > 0 && height <= 4320) return String(height);
-    return 'highest';
-}
-
-const STREAM_TYPES = new Set(['hls', 'dash', 'mp4', 'webm', 'mkv']);
-
-function validateUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    try {
-        const u = new URL(url);
-        return ['http:', 'https:'].includes(u.protocol);
-    } catch {
-        return false;
-    }
-}
-
-const shortText = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 100) : null);
-
-// The subtitle choice sent with a cast: null (off), a file to sideload
-// ({ url, language?, label? }) or a manifest rendition ({ language?, label? }).
-// Returns undefined when the value is present but malformed.
-function normalizeSubtitle(subtitle) {
-    if (subtitle === undefined || subtitle === null) return null;
-    if (typeof subtitle !== 'object' || Array.isArray(subtitle)) return undefined;
-    const language = shortText(subtitle.language);
-    const label = shortText(subtitle.label);
-    if (subtitle.url !== undefined) {
-        if (!validateUrl(subtitle.url) || subtitle.url.length > 4096) return undefined;
-        return { url: subtitle.url, language, label };
-    }
-    if (!language && !label) return undefined;
-    return { language, label };
-}
-
 // --- API: Cast ---
 router.post('/api/cast', (req, res) => {
-    const { ip, url, proxy, referer, deviceType } = req.body;
-    const quality = normalizeQuality(req.body.quality);
-    // The extractor's verdict on the format, for URLs that don't carry an extension.
-    const type = STREAM_TYPES.has(req.body.type) ? req.body.type : undefined;
-
-    if (!validateIp(ip)) {
-        return res.status(400).json({ error: 'Invalid or missing IP address' });
-    }
-    if (!validateUrl(url)) {
-        return res.status(400).json({ error: 'Invalid or missing URL. Only http and https protocols are allowed.' });
-    }
-    const subtitle = normalizeSubtitle(req.body.subtitle);
-    if (subtitle === undefined) {
-        return res.status(400).json({ error: 'Invalid subtitle choice' });
-    }
-
-    // Route to AirPlay or Chromecast based on device type
-    if (deviceType === 'airplay' || (devices.get(ip)?.type === 'airplay')) {
-        if (type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url))) {
-            return res.status(400).json({ error: 'Apple TV cannot play DASH streams. Cast this one to a Chromecast, or pick an HLS or MP4 stream.' });
-        }
-        // AirPlay 1 can't sideload text tracks; HLS subtitles are picked on the Apple TV itself.
-        return castToAirPlayDevice(ip, url, !!proxy, referer || '', quality, res, type);
-    }
-
-    // LG TVs play in their own browser (DASH through dash.js on the player page).
-    if (deviceType === 'webos' || devices.get(ip)?.type === 'webos') {
-        const isDash = type === 'dash' || (!type && /\.mpd(?:$|[?;])/i.test(url));
-        return castToWebOsDevice(ip, url, referer || '', quality, res, isDash ? 'dash' : type, subtitle);
-    }
-
-    // Convert a variant the Chromecast can't decode to HEVC as it's proxied
-    // (lib/transcode.js); needs the proxy and a working hardware encoder.
-    const transcode = req.body.transcode === true && !!proxy && isTranscodeAvailable();
-    castToDevice(ip, url, !!proxy, referer || '', quality, res, type, subtitle, transcode);
+    const { cast, error } = parseCastRequest(req.body);
+    if (error) return res.status(400).json({ error });
+    // Casting something new replaces what was queued behind the old stream.
+    clearQueue(cast.ip);
+    startCast(cast, res);
 });
 
 // --- API: Running Sessions ---
@@ -171,6 +90,8 @@ router.post('/api/stop', async (req, res) => {
     if (!validateIp(ip)) {
         return res.status(400).json({ error: 'Invalid or missing IP address' });
     }
+    // Stop means stop: nothing queued starts afterwards.
+    clearQueue(ip);
 
     // Check AirPlay sessions first
     if (activeAirPlaySessions.has(ip)) {

@@ -7,6 +7,7 @@ import { renderStats, renderBufferHealth, setStreamNotice } from './dashboard.js
 import { renderDashboardSubtitles } from './subtitles.js';
 import { applyPlayerStatus, renderPlayback } from './playback.js';
 import { rememberCannotPlayConverted } from './recent.js';
+import { applyQueue } from './queue.js';
 
 function onStreamStats(data) {
     const stream = state.streams.get(data.deviceIp);
@@ -144,6 +145,13 @@ const handlers = {
     castError: onCastError,
     castFallback: onCastFallback,
     volume: onVolume,
+    queue: (data) => applyQueue(data.deviceIp, data.items),
+    // The next video in a queue couldn't start: say so on the stream (if
+    // it's still shown) and in the status line.
+    queueError: (data) => {
+        if (state.streams.has(data.deviceIp)) setStreamNotice(data.deviceIp, { type: 'error', message: data.message });
+        updateStatus(data.message, 'error');
+    },
     subtitleTracks: onSubtitleTracks,
     pairingStatus: (data) => {
         if (data.status === 'paired') state.pairedDevices.add(data.deviceIp);

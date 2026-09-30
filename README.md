@@ -39,6 +39,8 @@ on your laptop or phone: once the video has started, you can close the tab.
 - **Three kinds of receiver**, discovered automatically over mDNS and SSDP: Chromecast and Cast TVs, Apple TV (AirPlay,
   including PIN pairing) and LG webOS TVs.
 - **Live streams** start near the live edge. You can go back along the timeline and jump to live again.
+- **Up next.** Queue videos behind the one playing. The queue is kept on the server and moves on by itself when a
+  video ends, with no browser open.
 - **Remote control and health.** Pause, seek and change the volume from the dashboard. The dashboard shows transfer
   rate, buffering and latency, and restarts streams that stall.
 - **4K on Chromecast.** 4K H.264 streams are converted to HEVC on the fly with an Intel, AMD or NVIDIA GPU.

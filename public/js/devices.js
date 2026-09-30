@@ -123,9 +123,24 @@ export function filterDeviceDropdown() {
     deviceSelect.querySelectorAll('option').forEach(opt => {
         if (opt.value && opt.value !== 'manual') {
             opt.disabled = state.streams.has(ipOf(opt.value));
+        } else if (opt.value === 'manual') {
+            opt.disabled = false;
         }
     });
     renderPicker();
+}
+
+// Queueing a video for a playing stream: its device is the only choice.
+// One cast to by IP (not in the list) is picked as a manual entry.
+export function pickOnlyDevice(ip, type) {
+    const value = optionValue(ip, type);
+    const listed = [...deviceSelect.options].some(o => o.value === value);
+    deviceSelect.querySelectorAll('option').forEach(opt => {
+        if (opt.value) opt.disabled = opt.value !== (listed ? value : 'manual');
+    });
+    deviceSelect.value = listed ? value : 'manual';
+    if (!listed) manualIpInput.value = ip;
+    toggleManualInput();
 }
 
 // A picker option's value: the IP, prefixed for the LG webOS way of casting

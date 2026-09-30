@@ -281,6 +281,19 @@
                         <p id="volume-note" class="volume-note hidden">Use the Apple TV remote for volume</p>
                     </div>
 
+                    <!-- What plays after this stream (lib/queue.js) -->
+                    <section id="queue-panel" class="queue-panel" aria-labelledby="queue-title">
+                        <div class="queue-header">
+                            <h3 id="queue-title" class="queue-title">Up next</h3>
+                            <div class="queue-actions">
+                                <button id="queue-next-btn" class="queue-btn hidden" type="button">Play next now</button>
+                                <button id="queue-add-btn" class="queue-btn" type="button">Add a video</button>
+                            </div>
+                        </div>
+                        <ol id="queue-list" class="queue-list"></ol>
+                        <p id="queue-note" class="queue-note">Nothing queued. Videos you add play when this one ends.</p>
+                    </section>
+
                     <!-- Headline stats -->
                     <div class="stats-grid-4">
                         <div class="stat-tile stat-tile-quality">
@@ -437,6 +450,7 @@
                 <h3>Tips</h3>
                 <ul>
                     <li><strong>Proxy stream</strong> (under Advanced): Keep this on for most videos. It fixes CORS errors and enables HLS/m3u8 streaming.</li>
+                    <li><strong>Up next:</strong> While a stream plays, "Add a video" queues another for the same device. It starts when the current one ends, even with this page closed. On Apple TV, press "Play next now" instead.</li>
                     <li><strong>Recent:</strong> Videos you've cast are listed under the URL field. Click one to analyze it again.</li>
                     <li><strong>Stopping:</strong> Stop and the × on a stream ask you to click again to confirm, so a stray click doesn't end playback.</li>
                     <li><strong>Subtitles:</strong> Subtitles found with a video can be picked before casting, or add a WebVTT/SRT file by URL. On a Chromecast you can switch them or turn them off while playing; on Apple TV, use the TV remote.</li>

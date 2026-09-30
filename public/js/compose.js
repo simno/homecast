@@ -12,8 +12,10 @@ import { apiPost } from './api.js';
 import { updateStatus } from './status.js';
 import { createStreamEntry, renderStreamBar, setMode } from './streams.js';
 import {
-    findDeviceName, filterDeviceDropdown, selectedDeviceIp, selectedDeviceKey, selectedDeviceType, showManualIpHint
+    findDeviceName, filterDeviceDropdown, pickOnlyDevice, selectedDeviceIp, selectedDeviceKey, selectedDeviceType, showManualIpHint
 } from './devices.js';
+import { applyQueue } from './queue.js';
+import { renderDashboard } from './dashboard.js';
 import { showPinPrompt } from './pairing.js';
 import {
     populateSubtitleOptions, subtitleChoiceReady, selectedSubtitle, rememberSubtitleChoice
@@ -37,9 +39,14 @@ export function resetComposeForm() {
     renderRecent();
 }
 
-export function openComposeOverlay() {
+// `queueFor`: a playing stream's IP. The form then queues a video to play
+// after it, on its device, instead of starting a new stream.
+export function openComposeOverlay({ queueFor = null } = {}) {
     resetComposeForm();
-    filterDeviceDropdown();
+    state.compose.queueFor = queueFor;
+    if (queueFor) pickOnlyDevice(queueFor, state.streams.get(queueFor)?.deviceType);
+    else filterDeviceDropdown();
+    setCastButton({ busy: false });
     composeOverlay.classList.remove('hidden');
     composePanel.classList.add('overlay-active');
 }
@@ -47,6 +54,8 @@ export function openComposeOverlay() {
 export function closeComposeOverlay() {
     composeOverlay.classList.add('hidden');
     composePanel.classList.remove('overlay-active');
+    state.compose.queueFor = null;
+    setCastButton({ busy: false });
 }
 
 export function isComposeOverlayOpen() {
@@ -72,7 +81,8 @@ export function onDeviceChanged() {
 }
 
 function setCastButton({ busy }) {
-    castBtnLabel.textContent = busy ? 'Casting…' : 'Start Casting';
+    if (state.compose.queueFor) castBtnLabel.textContent = busy ? 'Adding…' : 'Play next';
+    else castBtnLabel.textContent = busy ? 'Casting…' : 'Start Casting';
 }
 
 // ===== ANALYZE =====
@@ -376,18 +386,22 @@ qualityNoteSwitch.addEventListener('click', () => {
 // the same params to /api/cast and handle the same needsPairing/error/success
 // shapes, so a fix to one path can't silently miss the other.
 // `page`: the URL and title the user analysed, remembered as a recent cast.
-async function performCast(params, { loadingMessage, allowPairingRetry, page, deviceKey }) {
+// `queue`: add it to the device's Up next (/api/queue) rather than cast now;
+// with nothing playing there any more, the server casts it now after all.
+async function performCast(params, { loadingMessage, allowPairingRetry, page, deviceKey, queue = false }) {
     castBtn.disabled = true;
     setCastButton({ busy: true });
     updateStatus(loadingMessage, 'loading');
 
     try {
-        const res = await apiPost('/api/cast', params);
+        const res = queue
+            ? await apiPost('/api/queue', { ...params, title: page?.title, page: page?.url })
+            : await apiPost('/api/cast', params);
         const data = await res.json();
 
         if (data.needsPairing && allowPairingRetry) {
             showPinPrompt(data.deviceIp, data.deviceName, () => {
-                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false, page, deviceKey });
+                performCast(params, { loadingMessage: 'Retrying cast after pairing...', allowPairingRetry: false, page, deviceKey, queue });
             });
             castBtn.disabled = false;
             setCastButton({ busy: false });
@@ -399,8 +413,14 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page, de
         }
 
         rememberSubtitleChoice(params.subtitle);
-        rememberDevice(deviceKey || params.ip);
         if (page?.url) addRecent(page.url, page.title);
+        if (data.queued) {
+            applyQueue(params.ip, data.items);
+            closeComposeOverlay();
+            renderDashboard();
+            return;
+        }
+        rememberDevice(deviceKey || params.ip);
         // A manually entered IP may still be a discovered device of known type;
         // an LG TV cast to through its browser shares its IP with its Cast receiver.
         const deviceType = params.deviceType === 'webos' ? 'webos'
@@ -444,9 +464,10 @@ export async function startCasting() {
         type: stream.type,
         subtitle: selectedSubtitle()
     }, {
-        loadingMessage: 'Connecting to device...',
+        loadingMessage: state.compose.queueFor ? 'Adding to Up next…' : 'Connecting to device...',
         allowPairingRetry: true,
         page: { url: videoUrlInput.value.trim(), title: state.compose.title },
-        deviceKey: selectedDeviceKey()
+        deviceKey: selectedDeviceKey(),
+        queue: !!state.compose.queueFor
     });
 }
