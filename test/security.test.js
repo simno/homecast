@@ -5,7 +5,8 @@ const { test } = require('node:test');
 const assert = require('assert');
 const http = require('http');
 const axios = require('axios');
-const { isPrivateIP, validateProxyUrl, guardRedirect, safeRequestOptions } = require('../lib/security');
+const dns = require('dns');
+const { isPrivateIP, validateProxyUrl, guardRedirect, safeLookup, safeRequestOptions } = require('../lib/security');
 
 test('private and special IPv4 ranges are blocked', () => {
     for (const ip of ['0.0.0.0', '10.1.2.3', '100.64.0.1', '127.0.0.1', '169.254.169.254',
@@ -74,4 +75,78 @@ test('a redirect to an IP literal is refused end to end', async () => {
     } finally {
         server.close();
     }
+});
+
+// ===== Names that resolve to private addresses =====
+// A public-looking name can point anywhere; what it resolves to decides.
+
+test('validateProxyUrl blocks a name that resolves to a private address', async (t) => {
+    t.mock.method(dns.promises, 'lookup', async (host) => (host === 'intranet.example.com'
+        ? [{ address: '93.184.216.34', family: 4 }, { address: '10.0.0.5', family: 4 }]
+        : [{ address: '93.184.216.34', family: 4 }]));
+    const blocked = await validateProxyUrl('http://intranet.example.com/admin');
+    assert.strictEqual(blocked.valid, false);
+    assert.match(blocked.reason, /10\.0\.0\.5/);
+    assert.strictEqual((await validateProxyUrl('https://cdn.example.com/v.m3u8')).valid, true);
+});
+
+test('a name that does not resolve is left for the request to fail on', async (t) => {
+    t.mock.method(dns.promises, 'lookup', async () => { throw Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }); });
+    assert.strictEqual((await validateProxyUrl('https://nowhere.invalid/')).valid, true);
+});
+
+// DNS rebinding: the name passed validation, then resolves somewhere else
+// when the connection is made. safeLookup checks again at that point.
+test('safeLookup refuses a connection to a private address, single or all', async (t) => {
+    const answers = { 'rebound.example.com': '169.254.169.254', 'cdn.example.com': '93.184.216.34' };
+    t.mock.method(dns, 'lookup', (host, options, cb) => {
+        const address = answers[host];
+        if (options.all) return cb(null, [{ address: '93.184.216.34', family: 4 }, { address, family: 4 }]);
+        cb(null, address, 4);
+    });
+    const lookup = (host, options = {}) => new Promise((resolve, reject) => {
+        safeLookup(host, options, (err, address) => (err ? reject(err) : resolve(address)));
+    });
+
+    await assert.rejects(lookup('rebound.example.com'), /Blocked connection to private IP \(169\.254\.169\.254\)/);
+    await assert.rejects(lookup('rebound.example.com', { all: true }), /169\.254\.169\.254/);
+    assert.strictEqual(await lookup('cdn.example.com'), '93.184.216.34');
+    // The (host, callback) form Node also uses.
+    await new Promise((resolve) => safeLookup('rebound.example.com', (err) => {
+        assert.match(err.message, /Blocked/);
+        resolve();
+    }));
+});
+
+test('axios requests go through the check at connect time', async (t) => {
+    t.mock.method(dns, 'lookup', (host, options, cb) => (options.all
+        ? cb(null, [{ address: '127.0.0.1', family: 4 }])
+        : cb(null, '127.0.0.1', 4)));
+    await assert.rejects(axios.get('http://rebound.example.com/', { ...safeRequestOptions, timeout: 2000 }), /Blocked connection to private IP/);
+});
+
+// The headless browser runs the page inside our network: it's held to the
+// same rules, starting with the page itself.
+test('the headless browser won\'t load a page on a private address', async (t) => {
+    const { chromium } = require('playwright');
+    try {
+        await (await chromium.launch()).close();
+    } catch {
+        return t.skip('Playwright Chromium not installed');
+    }
+    const { extractWithBrowser, closeBrowser } = require('../lib/browser');
+    t.after(closeBrowser);
+    let requested = false;
+    const site = http.createServer((req, res) => {
+        requested = true;
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<script>fetch("/live.m3u8")</script>');
+    });
+    await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
+    t.after(() => site.close());
+
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 3000);
+    assert.strictEqual(await extractWithBrowser(`http://127.0.0.1:${site.address().port}/`, { signal: controller.signal }), null);
+    assert.strictEqual(requested, false);
 });

@@ -215,3 +215,36 @@ test('UI files are revalidated on every load, so an upgrade shows up straight aw
         assert.ok(res.headers.get('etag'), `${path} has no ETag to revalidate with`);
     }
 });
+
+// ===== Diagnostics =====
+
+test('/api/stats reports each stream\'s transfer in MB and KB/s', async (t) => {
+    const { streamStats } = require('../lib/state');
+    const now = Date.now();
+    streamStats.set('192.168.1.90', {
+        totalBytes: 10 * 1024 * 1024, startTime: now - 10_000, lastActivity: now,
+        resolution: '1920x1080', bitrate: 8000, segmentCount: 12, cacheHits: 3
+    });
+    t.after(() => streamStats.delete('192.168.1.90'));
+
+    const all = await (await fetch(`${base}/api/stats`)).json();
+    const stats = all.find(s => s.clientIp === '192.168.1.90');
+    assert.strictEqual(stats.totalMB, '10.00');
+    assert.ok(stats.transferRate >= 1000 && stats.transferRate <= 1024, `${stats.transferRate} KB/s`);
+    assert.strictEqual(stats.duration, 10);
+    assert.strictEqual(stats.resolution, '1920x1080');
+    assert.strictEqual(stats.segmentCount, 12);
+});
+
+test('/api/discovery/status shows what discovery knows, for troubleshooting', async (t) => {
+    const { devices } = require('../lib/state');
+    devices.set('192.168.1.91', { name: 'Den', ip: '192.168.1.91', type: 'chromecast' });
+    t.after(() => devices.delete('192.168.1.91'));
+
+    const status = await (await fetch(`${base}/api/discovery/status`)).json();
+    assert.strictEqual(status.devicesFound, 1);
+    assert.deepStrictEqual(status.devices.map(d => d.name), ['Den']);
+    assert.ok(Object.values(status.networkInterfaces).flat().every(i => i.family === 'IPv4'));
+    assert.ok(status.serverIP);
+    assert.match(status.mdnsNote, /network_mode: host/);
+});
