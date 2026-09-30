@@ -48,6 +48,7 @@ export function openComposeOverlay({ queueFor = null } = {}) {
     else filterDeviceDropdown();
     setComposeHeading();
     setCastButton({ busy: false });
+    renderRecent();
     composeOverlay.classList.remove('hidden');
     composePanel.classList.add('overlay-active');
 }
@@ -409,9 +410,10 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page, de
     updateStatus(loadingMessage, 'loading');
 
     try {
+        const body = { ...params, page: page?.url || undefined };
         const res = queue
-            ? await apiPost('/api/queue', { ...params, title: page?.title, page: page?.url })
-            : await apiPost('/api/cast', params);
+            ? await apiPost('/api/queue', { ...body, title: page?.title })
+            : await apiPost('/api/cast', body);
         const data = await res.json();
 
         if (data.needsPairing && allowPairingRetry) {
@@ -441,6 +443,7 @@ async function performCast(params, { loadingMessage, allowPairingRetry, page, de
         const deviceType = params.deviceType === 'webos' ? 'webos'
             : state.devices.find(d => d.ip === params.ip)?.type || params.deviceType;
         createStreamEntry(params.ip, findDeviceName(params.ip), deviceType);
+        state.streams.get(params.ip).page = page?.url || params.url;
         if (data.subtitles) state.streams.get(params.ip).subtitles = data.subtitles;
         if (data.volume) state.streams.get(params.ip).volume = data.volume;
         state.activeStreamIp = params.ip;

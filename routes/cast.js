@@ -5,7 +5,7 @@ const { stopAirPlayCasting, controlAirPlayPlayback } = require('../lib/airplay')
 const { stopWebOsCasting, controlWebOsPlayback, webOsVolume } = require('../lib/webos');
 const { subtitleState, selectSubtitle } = require('../lib/subtitles');
 const { getBufferHealthStats } = require('../lib/stats');
-const { validateIp, parseCastRequest, startCast } = require('../lib/dispatch');
+const { validateIp, parseCastRequest, startCast, castPage } = require('../lib/dispatch');
 const { clearQueue } = require('../lib/queue');
 
 const router = express.Router();
@@ -53,7 +53,8 @@ router.get('/api/session/:ip', async (req, res) => {
             volume: session.volume || null,
             playback,
             bufferHealth: getBufferHealthStats(ip),
-            notice: sessionNotice(ip)
+            notice: sessionNotice(ip),
+            page: castPage(ip)
         });
     }
 
@@ -66,6 +67,7 @@ router.get('/api/session/:ip', async (req, res) => {
             type: 'airplay',
             stats: stats || null,
             startTime: airPlaySession.startTime,
+            page: castPage(ip),
             playback: { status: { playerState: airPlaySession.playerState }, statusAgeMs: 0, ended: false }
         });
     }
@@ -77,6 +79,7 @@ router.get('/api/session/:ip', async (req, res) => {
             type: 'webos',
             stats: streamStats.get(ip) || null,
             startTime: webOsSession.startTime,
+            page: castPage(ip),
             volume: webOsSession.volume || await webOsVolume(ip),
             playback: webOsSession.lastStatus
                 ? { status: webOsSession.lastStatus.status, statusAgeMs: Date.now() - webOsSession.lastStatus.at, ended: false }

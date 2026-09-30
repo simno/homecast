@@ -22,7 +22,7 @@ router.post('/api/queue', (req, res) => {
     if (error) return res.status(400).json({ error });
     if (!isPlaying(cast.ip)) return startCast(cast, res);
     try {
-        enqueue(cast, { title: req.body.title, url: req.body.page });
+        enqueue(cast, { title: req.body.title, url: cast.page });
     } catch (err) {
         return res.status(409).json({ error: err.message });
     }

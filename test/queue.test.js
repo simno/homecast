@@ -250,3 +250,15 @@ test('on an LG TV the browser stays up between videos, and goes back to the TV a
     await waitFor(() => fake.state.launched.some(l => l.id === 'com.webos.app.livetv'));
     assert.ok(!state.activeWebOsSessions.has(IP));
 });
+
+test('each cast records the page it came from, and the queue passes it on', async () => {
+    mockChromecast();
+    await post('/api/cast', { ip: IP, url: video(1), type: 'mp4', page: 'https://example.com/one' });
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.page, 'https://example.com/one');
+    await post('/api/queue', { ip: IP, url: video(2), type: 'mp4', page: 'https://example.com/two' });
+    await post(`/api/queue/${IP}/next`, {});
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.page, 'https://example.com/two');
+    // No page given: the video itself.
+    await post('/api/cast', { ip: IP, url: video(3), type: 'mp4', page: 'javascript:alert(1)' });
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.page, video(3));
+});

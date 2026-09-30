@@ -2,6 +2,7 @@
 // the last device (preselected next time), and devices that couldn't play a
 // stream converted to 4K HEVC. Kept in this browser only.
 import { recentUrls, recentList, recentClearBtn, videoUrlInput, resolvedUrlContainer } from './dom.js';
+import { state } from './state.js';
 
 const RECENT_KEY = 'homecast_recent';
 const LAST_DEVICE_KEY = 'homecast_last_device';
@@ -75,8 +76,17 @@ function hostOf(url) {
 }
 
 // Shown only while the URL field is empty and nothing has been analysed.
+// Queueing for a stream: what it's playing, and what's queued after it,
+// aren't worth offering again.
+function alreadyLined() {
+    const stream = state.streams.get(state.compose.queueFor);
+    if (!stream) return new Set();
+    return new Set([stream.page, ...(stream.queue || []).map(item => item.url)].filter(Boolean));
+}
+
 export function renderRecent() {
-    const list = loadRecent();
+    const lined = alreadyLined();
+    const list = loadRecent().filter(entry => !lined.has(entry.url));
     const show = list.length > 0 && !videoUrlInput.value.trim() && resolvedUrlContainer.classList.contains('hidden');
     recentUrls.classList.toggle('hidden', !show);
     if (!show) return;

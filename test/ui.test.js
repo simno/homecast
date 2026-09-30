@@ -454,3 +454,36 @@ test('a converted stream this page didn\'t start says why it fell back to direct
     assert.match(await page.textContent('#dashboard-notice-text'), /couldn.t play the converted 4K stream/);
     assert.deepStrictEqual(pageErrors, []);
 });
+
+test('the queue form doesn\'t offer the video playing, or ones already queued, as recent', async (t) => {
+    if (needBrowser(t)) return;
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const recent = [`${cdn}/watch-3`, `${cdn}/watch-2`, `${cdn}/watch`].map(url => ({ url, title: null }));
+    await context.addInitScript((list) => {
+        if (!globalThis.localStorage.getItem('homecast_recent')) globalThis.localStorage.setItem('homecast_recent', JSON.stringify(list));
+    }, recent);
+    page = await context.newPage();
+    pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+    await page.goto(base);
+
+    await pickMockDevice();
+    await analyze(`${cdn}/watch`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    const listed = () => page.$$eval('#recent-list .recent-item', items => items.map(i => i.dataset.url));
+
+    await page.click('#queue-add-btn');
+    assert.deepStrictEqual(await listed(), [`${cdn}/watch-3`, `${cdn}/watch-2`]);
+    await analyze(`${cdn}/watch-2`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#queue-list li');
+
+    await page.click('#queue-add-btn');
+    assert.deepStrictEqual(await listed(), [`${cdn}/watch-3`]);
+    await page.click('#compose-close-btn');
+    // A new stream's form offers them all.
+    await page.click('#add-stream-btn');
+    assert.deepStrictEqual((await listed()).sort(), [`${cdn}/watch`, `${cdn}/watch-2`, `${cdn}/watch-3`]);
+    assert.deepStrictEqual(pageErrors, []);
+});
