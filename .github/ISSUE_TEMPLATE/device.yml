@@ -1,0 +1,63 @@
+name: Device problem
+description: A TV isn't found, won't pair, or doesn't play what HomeCast sends it.
+labels: [device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [Troubleshooting](https://github.com/simno/homecast/blob/main/docs/troubleshooting.md) covers the common
+        causes: host networking in Docker, firewalls, subnets and pairing.
+  - type: dropdown
+    id: receiver
+    attributes:
+      label: Receiver
+      options:
+        - Chromecast or a TV with Cast built in
+        - Apple TV (AirPlay)
+        - LG webOS TV
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and software version
+      placeholder: Chromecast with Google TV (4K), Android TV 14
+    validations:
+      required: true
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What goes wrong
+      options:
+        - It isn't in the device list
+        - Pairing or the permission prompt fails
+        - It connects, but nothing plays
+        - Playback stalls or stops
+        - Controls (pause, seek, volume) don't work
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: The startup lines for discovery problems, otherwise the lines around the failure (`docker logs homecast`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: How HomeCast runs (Docker with host networking, from source…), and whether it's on the same subnet as the TV.
+  - type: input
+    id: version
+    attributes:
+      label: HomeCast version
+      placeholder: "0.9.11"
