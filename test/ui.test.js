@@ -346,6 +346,14 @@ test('the volume slider sets the device volume, and says when the device ignores
     assert.strictEqual(await page.textContent('#volume-note'), 'Set the volume with the TV remote');
     assert.strictEqual(await page.isVisible('#volume-note'), true);
     assert.strictEqual(await page.isEnabled('#mute-btn'), true);
+
+    // Once HomeCast finds the LG TV behind it, the slider is the TV's, and says so.
+    require('../lib/websocket').broadcast({
+        type: 'volume', deviceIp: MOCK_IP, volume: { level: 0.2, muted: false, fixed: false, via: 'LG OLED' }
+    });
+    await page.waitForSelector('#volume-slider:enabled');
+    assert.strictEqual(await page.textContent('#volume-note'), 'TV volume: LG OLED');
+    assert.strictEqual(await page.inputValue('#volume-slider'), '20');
     assert.deepStrictEqual(pageErrors, []);
 });
 

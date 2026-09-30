@@ -81,9 +81,11 @@ function renderVolume(stream, { force = false } = {}) {
     const airplay = isAirPlay(stream);
     const volume = stream.volume;
     playback.volumeControl.classList.toggle('hidden', airplay);
-    // An Apple TV, or a device whose TV owns the level, is turned up with a remote.
-    playback.volumeNote.textContent = airplay ? 'Use the Apple TV remote for volume' : 'Set the volume with the TV remote';
-    playback.volumeNote.classList.toggle('hidden', !airplay && !volume?.fixed);
+    // An Apple TV, or a device whose TV owns the level, is turned up with a
+    // remote; a Chromecast whose LG TV HomeCast found turns up that TV.
+    playback.volumeNote.textContent = airplay ? 'Use the Apple TV remote for volume'
+        : volume?.via ? `TV volume: ${volume.via}` : 'Set the volume with the TV remote';
+    playback.volumeNote.classList.toggle('hidden', !airplay && !volume?.fixed && !volume?.via);
     if (airplay) return;
 
     playback.volumeSlider.disabled = !volume || !!volume.fixed;

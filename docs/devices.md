@@ -11,6 +11,11 @@ If a device isn't found, press the rescan button next to the device list, or cho
 Chromecasts play HLS, DASH, MP4 and WebM. You can change the volume and switch subtitles from the dashboard during
 playback.
 
+**Volume controlled by the TV.** Some Chromecasts, such as Google TV models set to control the TV's volume over
+HDMI, don't let apps change their volume. If the TV is an LG webOS TV that HomeCast has cast to before, HomeCast
+finds it (it's the one showing an HDMI input) and the dashboard's slider sets the TV's volume instead, labelled
+**TV volume**. Otherwise the slider is disabled and the TV remote sets the volume.
+
 Chromecasts and Cast TVs decode 4K only as HEVC, VP9 or AV1. A 4K H.264 stream plays at 1080p unless HomeCast can
 [convert it](4k-conversion.md). An LG TV can instead play it as it is, in its browser (see below).
 
