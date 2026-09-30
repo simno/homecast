@@ -31,6 +31,9 @@ npm test            # node:test unit and HTTP tests
 npm run check       # all three
 ```
 
+`npm run test:sites` checks the Twitch, X and SpaceX resolvers against the real sites. It isn't part of `npm test`
+because it needs the internet. CI runs it weekly and opens an issue when it fails.
+
 CI runs `lint`, `typecheck` and the tests on every branch and pull request. Please run `npm run check` before opening
 a pull request, and add tests for behaviour you change.
 

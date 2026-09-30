@@ -17,6 +17,7 @@
     "test:edge-cases": "node --test test/edge-cases.test.js",
     "test:performance": "node --test test/performance.test.js",
     "test:advanced": "node --test test/stream-detection.test.js",
+    "test:sites": "node --test test/sites.smoke.js",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "typecheck": "tsc --project jsconfig.json",
