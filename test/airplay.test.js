@@ -1,7 +1,9 @@
 // AirPlay & WOL unit tests
 const { test } = require('node:test');
 const os = require('os');
-const { extractMAC, sendWOL, subnetBroadcasts } = require('../lib/wol');
+const fs = require('fs');
+const path = require('path');
+const { extractMAC, sendWOL, subnetBroadcasts, macFromProcArp } = require('../lib/wol');
 const { extractVideoFromHtml } = require('../lib/extraction');
 
 // ===== MAC Extraction =====
@@ -62,6 +64,21 @@ test('Send WOL rejects invalid MAC', async () => {
             throw err;
         }
     }
+});
+
+test('macFromProcArp: reads a complete entry from the Linux ARP table', () => {
+    const table = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'homecast-arp-')), 'arp');
+    fs.writeFileSync(table, [
+        'IP address       HW type     Flags       HW address            Mask     Device',
+        '192.168.1.60     0x1         0x2         A8:23:FE:01:02:03     *        eth0',
+        '192.168.1.61     0x1         0x0         00:00:00:00:00:00     *        eth0',
+        ''
+    ].join('\n'));
+    if (macFromProcArp('192.168.1.60', table) !== 'a8:23:fe:01:02:03') throw new Error('Expected the TV\'s MAC');
+    if (macFromProcArp('192.168.1.61', table) !== null) throw new Error('An incomplete entry has no MAC');
+    if (macFromProcArp('192.168.1.6', table) !== null) throw new Error('Only an exact address matches');
+    if (macFromProcArp('192.168.1.60', path.join(table, 'missing')) !== null) throw new Error('No table, no MAC');
+    fs.rmSync(path.dirname(table), { recursive: true });
 });
 
 // ===== Extraction: don't match player page URLs as video =====
