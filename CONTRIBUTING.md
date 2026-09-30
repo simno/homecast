@@ -48,6 +48,16 @@ Maintainers release with:
 npm run release:patch   # or release:minor / release:major
 ```
 
-The script runs the checks, bumps the version, commits, tags `vX.Y.Z` and, once confirmed, pushes. The tag triggers
-the Docker workflow, which builds the `full` and `lite` images for amd64 and arm64. It publishes them to GHCR with
-attestations as `latest`/`lite` and as the version at each precision (`1.2.3`, `1.2`, `1`).
+The script checks that `main` is up to date with GitHub and that there's something to release. It then runs the
+checks, bumps the version, commits, tags `vX.Y.Z` and shows the release notes. Once confirmed, it pushes the commit
+and the tag together.
+
+The tag starts the release workflow (`.github/workflows/release.yml`):
+
+1. It runs the checks again on the tag.
+2. It builds the `full` and `lite` images for amd64 and arm64 and publishes them to GHCR with attestations, as
+   `latest`/`lite` and as the version at each precision (`1.2.3`, `1.2`, `1`).
+3. It publishes a GitHub release for the tag. The notes list every commit since the previous release, grouped into
+   features, fixes and other changes by their `feat:`/`fix:` prefix, with the version's `docker pull` commands.
+
+`scripts/release-notes.sh vX.Y.Z` prints the notes for any tag.

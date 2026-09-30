@@ -1,5 +1,7 @@
-name: Build and Push Docker Image
+name: Release
 
+# A version tag (pushed by release.sh): test it, build and push its Docker
+# images, then publish a GitHub release listing the commits since the last one.
 on:
   push:
     tags:
@@ -10,8 +12,33 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for the UI tests
+        run: npx playwright install --with-deps --only-shell chromium
+
+      - name: Lint, type check and test
+        run: npm run check
+
   build-and-push:
     name: Build and Push Docker Image (${{ matrix.variant }})
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -79,3 +106,29 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  github-release:
+    name: Publish GitHub Release
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # every commit and tag, to list what's new since the last release
+
+      - name: Write release notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A re-run updates the release instead of failing on it.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
+          fi
