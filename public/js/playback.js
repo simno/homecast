@@ -75,14 +75,18 @@ function renderPlayPause(stream) {
     playback.playPause.setAttribute('aria-label', label);
 }
 
-function renderVolume(stream) {
+// `force`: set the slider even while it has focus (the device refused a
+// level, so what it shows is wrong).
+function renderVolume(stream, { force = false } = {}) {
     const airplay = isAirPlay(stream);
+    const volume = stream.volume;
     playback.volumeControl.classList.toggle('hidden', airplay);
-    playback.volumeNote.classList.toggle('hidden', !airplay);
+    // An Apple TV, or a device whose TV owns the level, is turned up with a remote.
+    playback.volumeNote.textContent = airplay ? 'Use the Apple TV remote for volume' : 'Set the volume with the TV remote';
+    playback.volumeNote.classList.toggle('hidden', !airplay && !volume?.fixed);
     if (airplay) return;
 
-    const volume = stream.volume;
-    playback.volumeSlider.disabled = !volume;
+    playback.volumeSlider.disabled = !volume || !!volume.fixed;
     playback.muteBtn.disabled = !volume;
     if (!volume) return;
 
@@ -93,7 +97,7 @@ function renderVolume(stream) {
     playback.muteBtn.title = label;
     playback.muteBtn.setAttribute('aria-label', label);
     // Don't pull the slider out from under a drag in progress.
-    if (document.activeElement !== playback.volumeSlider) {
+    if (force || document.activeElement !== playback.volumeSlider) {
         playback.volumeSlider.value = String(Math.round((volume.level ?? 0) * 100));
     }
 }
@@ -140,6 +144,14 @@ export function applyPlayerStatus(stream, status, ended = false) {
             at: Date.now()
         };
     }
+}
+
+// The level the device really has, after it ignored one it was sent.
+export function showDeviceVolume(ip, volume) {
+    const stream = state.streams.get(ip);
+    if (!stream) return;
+    stream.volume = volume;
+    if (ip === state.activeStreamIp) renderVolume(stream, { force: true });
 }
 
 async function send(action, value) {
@@ -193,7 +205,7 @@ export function wirePlaybackControls() {
         const level = Number(playback.volumeSlider.value) / 100;
         const stream = activeStream();
         if (stream?.volume) {
-            stream.volume = { level, muted: false };
+            stream.volume = { ...stream.volume, level, muted: false };
             renderVolume(stream);
         }
         clearTimeout(volumeTimer);

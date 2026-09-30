@@ -5,7 +5,7 @@ import { updateDeviceList, findDeviceName, deviceTypeOf } from './devices.js';
 import { createStreamEntry, removeStreamEntry, renderStreamBar, setMode, setStreamHealth } from './streams.js';
 import { renderStats, renderBufferHealth, setStreamNotice } from './dashboard.js';
 import { renderDashboardSubtitles } from './subtitles.js';
-import { applyPlayerStatus, renderPlayback } from './playback.js';
+import { applyPlayerStatus, renderPlayback, showDeviceVolume } from './playback.js';
 import { rememberCannotPlayConverted } from './recent.js';
 import { applyQueue } from './queue.js';
 
@@ -144,6 +144,11 @@ const handlers = {
     streamRecovery: onStreamRecovery,
     castError: onCastError,
     castFallback: onCastFallback,
+    castNotice: (data) => {
+        if (!state.streams.has(data.deviceIp)) return;
+        if (data.volume) showDeviceVolume(data.deviceIp, data.volume);
+        setStreamNotice(data.deviceIp, { type: data.level || 'info', message: data.message });
+    },
     volume: onVolume,
     queue: (data) => applyQueue(data.deviceIp, data.items),
     // The next video in a queue couldn't start: say so on the stream (if

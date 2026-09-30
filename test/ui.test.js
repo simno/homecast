@@ -302,3 +302,36 @@ test('the bookmarklet can be copied on a plain http:// LAN address too', async (
     const copied = await reader.evaluate('navigator.clipboard.readText()');
     assert.ok(copied.startsWith(`javascript:(()=>{window.open("http://${lanIp}:${process.env.PORT}/?url="`), copied);
 });
+
+test('the volume slider sets the device volume, and says when the device ignores it', async (t) => {
+    if (needBrowser(t)) return;
+    await openPage();
+    await pickMockDevice();
+    await analyze(`${cdn}/watch`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    // Usable straight away: the cast's answer carried the volume.
+    assert.strictEqual(await page.isEnabled('#volume-slider'), true);
+    const client = () => activeSessions.get(MOCK_IP).client;
+
+    const setSlider = (value) => page.fill('#volume-slider', String(value));
+    await setSlider(30);
+    for (let i = 0; i < 40 && client().volume.level !== 0.3; i++) await page.waitForTimeout(50);
+    assert.strictEqual(client().volume.level, 0.3);
+
+    // A device whose TV owns the volume: the slider goes back, and the page says why.
+    client().ignoresLevel = true;
+    await setSlider(80);
+    await page.waitForSelector('#dashboard-notice:not(.hidden)', { timeout: 5000 });
+    assert.match(await page.textContent('#dashboard-notice-text'), /TV remote/);
+    assert.strictEqual(await page.inputValue('#volume-slider'), '30');
+
+    // One that says outright its volume is fixed: no slider, a note instead.
+    client().volume = { ...client().volume, controlType: 'fixed' };
+    client().emit('status', { volume: client().volume });
+    await page.waitForSelector('#volume-slider:disabled');
+    assert.strictEqual(await page.textContent('#volume-note'), 'Set the volume with the TV remote');
+    assert.strictEqual(await page.isVisible('#volume-note'), true);
+    assert.strictEqual(await page.isEnabled('#mute-btn'), true);
+    assert.deepStrictEqual(pageErrors, []);
+});

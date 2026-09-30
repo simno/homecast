@@ -412,3 +412,67 @@ test('a jump the TV makes on its own (its remote) is recognised as a seek', asyn
     mock.seek(600); // not through HomeCast
     assert.ok(bufferHealthTracking.get(MOCK_IP).lastSeekAt > 0, 'the buffering that follows is expected');
 });
+
+// ===== Volume =====
+
+const volumeOf = () => activeSessions.get(MOCK_IP)?.client;
+const playbackAction = (action, value) => post('/api/playback', { ip: MOCK_IP, action, value });
+
+test('the cast answer carries the device volume, so the slider works from the start', async () => {
+    registerMock();
+    const res = await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    assert.deepStrictEqual(res.body.volume, { level: 0.5, muted: false, fixed: false });
+});
+
+test('the slider sets the device volume', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    const res = await playbackAction('volume', 0.3);
+    assert.strictEqual(res.status, 200, JSON.stringify(res.body));
+    assert.strictEqual(volumeOf().volume.level, 0.3);
+});
+
+test('a device that ignores the level is caught, and the page shown its real volume', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    const page = await pageMessages();
+    try {
+        volumeOf().ignoresLevel = true;
+        assert.strictEqual((await playbackAction('volume', 0.2)).status, 200);
+        assert.ok(await waitFor(() => page.messages.some(m => m.type === 'castNotice'), 4000), 'the page hears about it');
+        const notice = page.messages.find(m => m.type === 'castNotice');
+        assert.match(notice.message, /TV remote/);
+        assert.deepStrictEqual(notice.volume, { level: 0.5, muted: false, fixed: false });
+    } finally {
+        page.close();
+    }
+});
+
+test('no warning when the device took the level', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    const page = await pageMessages();
+    try {
+        await playbackAction('volume', 0.2);
+        await new Promise(r => setTimeout(r, 1800));
+        assert.ok(!page.messages.some(m => m.type === 'castNotice'));
+    } finally {
+        page.close();
+    }
+});
+
+test('a device with fixed volume refuses levels but can still be muted', async () => {
+    registerMock();
+    await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    const client = volumeOf();
+    client.volume = { ...client.volume, controlType: 'fixed' };
+    client.emit('status', { volume: client.volume });
+    assert.strictEqual(activeSessions.get(MOCK_IP).volume.fixed, true);
+
+    const res = await playbackAction('volume', 0.9);
+    assert.strictEqual(res.status, 502);
+    assert.match(res.body.error, /TV remote/);
+    assert.strictEqual(client.volume.level, 0.5);
+    assert.strictEqual((await playbackAction('mute', true)).status, 200);
+    assert.strictEqual(client.volume.muted, true);
+});
