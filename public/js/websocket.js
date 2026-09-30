@@ -8,6 +8,7 @@ import { renderDashboardSubtitles } from './subtitles.js';
 import { applyPlayerStatus, renderPlayback, showDeviceVolume } from './playback.js';
 import { rememberCannotPlayConverted } from './recent.js';
 import { applyQueue } from './queue.js';
+import { hydrateStream } from './session.js';
 
 function onStreamStats(data) {
     const stream = state.streams.get(data.deviceIp);
@@ -56,6 +57,9 @@ function onPlayerStatus(data) {
                 setMode('dashboard');
             }
             renderStreamBar();
+            // Started without this page (another browser, the queue): what
+            // was sent before this entry existed has to be asked for.
+            hydrateStream(ip);
         }
 
         const entry = state.streams.get(ip);
@@ -94,10 +98,19 @@ function onStreamRecovery(data) {
 }
 
 // The receiver gave up on a stream: keep its pill, marked failed, with the
-// reason, rather than letting it vanish.
+// reason, rather than letting it vanish. One this page hasn't seen yet (the
+// next video in a queue, failing before it played) gets an entry for it.
 function onCastError(data) {
     const ip = data.deviceIp;
-    if (!state.streams.has(ip)) return;
+    if (!ip) return;
+    if (!state.streams.has(ip)) {
+        createStreamEntry(ip, findDeviceName(ip), deviceTypeOf(ip));
+        if (state.mode === 'setup') {
+            state.activeStreamIp = ip;
+            setMode('dashboard');
+        }
+        renderStreamBar();
+    }
     setStreamHealth(ip, 'failed');
     setStreamNotice(ip, { type: 'error', message: data.message });
     if (ip === state.activeStreamIp) updateStatus('Playback failed', 'error');

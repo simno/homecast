@@ -300,3 +300,15 @@ test('SSDP discovery names the TV from its device description', async (t) => {
     devices.delete('192.168.1.60');
     devices.delete('192.168.1.61');
 });
+
+test('a page opened later learns where the LG TV\'s player is, paused included', async () => {
+    await lgTv({ knownKey: 'key-1' });
+    await cast();
+    tv.lastPlayer().report({ playerState: 'PAUSED', currentTime: 42, duration: 600, live: false, fullscreen: true });
+    await waitFor(() => activeWebOsSessions.get(IP)?.lastStatus?.status.playerState === 'PAUSED');
+    const res = await fetch(`${base}/api/session/${IP}`);
+    const { playback } = await res.json();
+    assert.strictEqual(playback.status.playerState, 'PAUSED');
+    assert.strictEqual(playback.status.currentTime, 42);
+    assert.ok(playback.statusAgeMs >= 0);
+});

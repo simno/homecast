@@ -64,7 +64,8 @@ router.get('/api/session/:ip', async (req, res) => {
             active: true,
             type: 'airplay',
             stats: stats || null,
-            startTime: airPlaySession.startTime
+            startTime: airPlaySession.startTime,
+            playback: { status: { playerState: airPlaySession.playerState }, statusAgeMs: 0, ended: false }
         });
     }
 
@@ -75,7 +76,10 @@ router.get('/api/session/:ip', async (req, res) => {
             type: 'webos',
             stats: streamStats.get(ip) || null,
             startTime: webOsSession.startTime,
-            volume: webOsSession.volume || await webOsVolume(ip)
+            volume: webOsSession.volume || await webOsVolume(ip),
+            playback: webOsSession.lastStatus
+                ? { status: webOsSession.lastStatus.status, statusAgeMs: Date.now() - webOsSession.lastStatus.at, ended: false }
+                : null
         });
     }
 

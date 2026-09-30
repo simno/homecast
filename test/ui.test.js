@@ -36,6 +36,10 @@ const upstream = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         return res.end(`<html><head><title>Second Show</title></head><body><video src="${cdn}/v.mp4?n=2"></video></body></html>`);
     }
+    if (req.url === '/subs.vtt') {
+        res.writeHead(200, { 'Content-Type': 'text/vtt' });
+        return res.end('WEBVTT\n\n00:00.000 --> 00:05.000\nHello\n');
+    }
     if (req.url.startsWith('/v.mp4')) {
         res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': MP4.length });
         return res.end(MP4);
@@ -333,5 +337,87 @@ test('the volume slider sets the device volume, and says when the device ignores
     assert.strictEqual(await page.textContent('#volume-note'), 'Set the volume with the TV remote');
     assert.strictEqual(await page.isVisible('#volume-note'), true);
     assert.strictEqual(await page.isEnabled('#mute-btn'), true);
+    assert.deepStrictEqual(pageErrors, []);
+});
+
+// ===== Streams this page didn't start =====
+// State the server sends as a stream starts (volume, subtitles) can arrive
+// before the page has an entry for it; the page must still end up with it.
+
+async function castElsewhere(body) {
+    const res = await fetch(`${base}/api/csrf-token`);
+    const { token } = await res.json();
+    const cookie = res.headers.get('set-cookie').split(';')[0];
+    const cast = await fetch(`${base}/api/cast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token, Cookie: cookie },
+        body: JSON.stringify({ ip: MOCK_IP, proxy: false, ...body })
+    });
+    assert.strictEqual(cast.status, 200, await cast.text());
+}
+
+test('a stream cast from another browser shows up with its volume and subtitles', async (t) => {
+    if (needBrowser(t)) return;
+    await openPage();
+    // After the page's own restore of running streams, a second after load.
+    await page.waitForTimeout(1500);
+    await castElsewhere({
+        url: `${cdn}/v.mp4`, type: 'mp4',
+        subtitle: { url: `${cdn}/subs.vtt`, language: 'en', label: 'English' }
+    });
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    await page.waitForSelector('#volume-slider:enabled', { timeout: 5000 });
+    assert.strictEqual(await page.inputValue('#volume-slider'), '50');
+    assert.strictEqual(await page.isEnabled('#mute-btn'), true);
+    await page.waitForSelector('#dashboard-subtitles:not(.hidden)', { timeout: 5000 });
+    assert.match(await page.textContent('#dashboard-subtitle-select'), /English/);
+    assert.deepStrictEqual(pageErrors, []);
+});
+
+test('the next video in the queue shows up with its volume', async (t) => {
+    if (needBrowser(t)) return;
+    await openPage();
+    await pickMockDevice();
+    await analyze(`${cdn}/watch`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    await page.click('#queue-add-btn');
+    await analyze(`${cdn}/watch-2`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#queue-list li');
+
+    // The first video plays to its end; the server starts the next one.
+    const receiver = () => activeSessions.get(MOCK_IP)?.player.mockDevice;
+    for (let i = 0; i < 100 && receiver()?.playerState !== 'PLAYING'; i++) await page.waitForTimeout(50);
+    receiver().finish();
+    for (let i = 0; i < 200 && !receiver()?.media?.contentId?.includes('n%3D2'); i++) await page.waitForTimeout(50);
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    await page.waitForSelector('#volume-slider:enabled', { timeout: 5000 });
+    assert.strictEqual(await page.isEnabled('#mute-btn'), true);
+    assert.deepStrictEqual(pageErrors, []);
+});
+
+test('a queued video the TV rejects before playing is shown as failed, not lost', async (t) => {
+    if (needBrowser(t)) return;
+    await openPage();
+    await pickMockDevice();
+    await analyze(`${cdn}/watch`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#app[data-mode="dashboard"]');
+    await page.click('#queue-add-btn');
+    await analyze(`${cdn}/watch-2`);
+    await page.click('#cast-btn');
+    await page.waitForSelector('#queue-list li');
+
+    const receiver = () => activeSessions.get(MOCK_IP)?.player.mockDevice;
+    for (let i = 0; i < 100 && receiver()?.playerState !== 'PLAYING'; i++) await page.waitForTimeout(50);
+    receiver().finish();
+    // The next video loads, and the TV gives up on it before it plays.
+    for (let i = 0; i < 200 && !receiver()?.media?.contentId?.includes('n%3D2'); i++) await page.waitForTimeout(25);
+    receiver().fail();
+
+    await page.waitForSelector('#dashboard-notice:not(.hidden)', { timeout: 5000 });
+    assert.strictEqual(await page.getAttribute('#app', 'data-mode'), 'dashboard');
+    assert.match(await page.textContent('#dashboard-notice-text'), /decode|play/i);
     assert.deepStrictEqual(pageErrors, []);
 });

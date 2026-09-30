@@ -19,10 +19,11 @@ import {
 } from './compose.js';
 import { wirePairingControls, hidePinPrompt, isPinPromptOpen } from './pairing.js';
 import { wireSubtitleControls } from './subtitles.js';
-import { wirePlaybackControls, applyPlayerStatus } from './playback.js';
+import { wirePlaybackControls } from './playback.js';
 import { wireRecentControls } from './recent.js';
 import { connectWebSocket } from './websocket.js';
 import { wireQueueControls } from './queue.js';
+import { applySession } from './session.js';
 
 fetchCsrfToken();
 
@@ -199,28 +200,6 @@ connectWebSocket({ onReconnect: resyncStreams });
 startDashboardTimers({ onStale: (ip) => setStreamHealth(ip, 'stale') });
 
 // ===== RESTORE AND RESYNC STREAMS =====
-
-// Bring a stream's entry up to date with the server's view of its session.
-function applySession(stream, session) {
-    if (session.stats) stream.stats = session.stats;
-    if (session.subtitles) stream.subtitles = session.subtitles;
-    if (session.volume) stream.volume = session.volume;
-    if (session.bufferHealth) stream.bufferHealth = session.bufferHealth;
-    // Where playback is: receivers say only when it changes, so without
-    // this a page opened mid-stream has no position or timeline.
-    if (session.playback?.status) {
-        applyPlayerStatus(stream, session.playback.status, session.playback.ended);
-        if (stream.position) stream.position.at -= session.playback.statusAgeMs;
-        if (stream.liveRange) stream.liveRange.at -= session.playback.statusAgeMs;
-    }
-    const delay = session.tracking?.lastDelay;
-    if (delay > 0 && !stream.ended) {
-        stream.currentDelay = delay;
-        stream.hasDelay = true;
-    }
-    // Fresh from the server: not stale, whatever went missing before.
-    stream.lastStatsAt = Date.now();
-}
 
 // Match the page to the server: `candidates` ([{ ip, deviceName, deviceType }])
 // are checked, those still playing are shown (new entries created, existing

@@ -476,3 +476,21 @@ test('a device with fixed volume refuses levels but can still be muted', async (
     assert.strictEqual((await playbackAction('mute', true)).status, 200);
     assert.strictEqual(client.volume.muted, true);
 });
+
+// ===== Errors inside a cast =====
+
+test('an error thrown while starting a cast is answered, not left to crash the server', async (t) => {
+    registerMock();
+    // getLocalIp() is the first thing a cast does; make it throw.
+    const hostIp = process.env.HOST_IP;
+    delete process.env.HOST_IP;
+    t.after(() => { if (hostIp !== undefined) process.env.HOST_IP = hostIp; });
+    t.mock.method(require('os'), 'networkInterfaces', () => { throw new Error('no interfaces'); });
+
+    const res = await cast({ url: `${cdn}/v.mp4`, type: 'mp4' });
+    assert.strictEqual(res.status, 500);
+    assert.match(res.body.error, /no interfaces/);
+    // Still serving.
+    t.mock.restoreAll();
+    assert.strictEqual((await fetch(`${base}/api/devices`)).status, 200);
+});

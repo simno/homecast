@@ -325,3 +325,13 @@ test('liveEdge reads the end of the last seekable range', () => {
     assert.strictEqual(airplay.liveEdge(plist('')), null);
     assert.strictEqual(airplay.liveEdge('<plist><dict></dict></plist>'), null);
 });
+
+test('a page opened later learns the Apple TV is paused', async () => {
+    await appleTv();
+    await cast();
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.playback.status.playerState, 'PLAYING');
+    await control('pause');
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.playback.status.playerState, 'PAUSED');
+    await control('play');
+    assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.playback.status.playerState, 'PLAYING');
+});
