@@ -3,6 +3,7 @@
 // Apple TV in fake-apple-tv.js: discovery, PIN pairing and pair-verify, the
 // /play handshake, remote control, stopping, and an unreachable device.
 process.env.DISABLE_CSRF = 'true';            // server.test.js covers CSRF
+process.env.DISABLE_SSRF_PROTECTION = 'true'; // the stats test's video lives on 127.0.0.1
 
 const { test, before, after, afterEach } = require('node:test');
 const assert = require('assert');
@@ -334,4 +335,28 @@ test('a page opened later learns the Apple TV is paused', async () => {
     assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.playback.status.playerState, 'PAUSED');
     await control('play');
     assert.strictEqual((await request('GET', `/api/session/${IP}`)).body.playback.status.playerState, 'PLAYING');
+});
+
+test('what an Apple TV fetches through the proxy is counted in its stats', async () => {
+    const http = require('http');
+    const video = Buffer.alloc(200 * 1024, 7);
+    const cdn = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': video.length });
+        res.end(video);
+    });
+    await new Promise(resolve => cdn.listen(0, '127.0.0.1', resolve));
+    try {
+        await appleTv();
+        await cast({ proxy: true, url: `http://127.0.0.1:${cdn.address().port}/v.mp4`, type: 'mp4' });
+        // The Apple TV (here, 127.0.0.1) plays the proxy URL it was given.
+        const played = new URL(tv.state.playing);
+        await (await fetch(`${base}${played.pathname}${played.search}`)).arrayBuffer();
+
+        assert.strictEqual(streamStats.get(IP).totalBytes, video.length);
+        const [stats] = (await request('GET', '/api/stats')).body;
+        assert.strictEqual(stats.totalMB, (video.length / (1024 * 1024)).toFixed(2));
+        assert.ok(Number.isFinite(stats.transferRate));
+    } finally {
+        cdn.close();
+    }
 });
