@@ -205,7 +205,7 @@ router.post('/api/stop', async (req, res) => {
 
 // --- API: Playback Control ---
 // action: 'pause' | 'play' | 'seek' (value: seconds to skip, -3600..3600)
-// | 'seekTo' (value: position in seconds) | 'live' (jump to the live edge; not Apple TV)
+// | 'seekTo' (value: position in seconds) | 'live' (jump to the live edge)
 // | 'volume' (value: 0-1; not Apple TV) | 'mute' (value: boolean; not Apple TV)
 function validPlaybackValue(action, value) {
     if (action === 'pause' || action === 'play' || action === 'live') return true;
@@ -234,9 +234,6 @@ router.post('/api/playback', async (req, res) => {
     }
     if (airplay && (action === 'volume' || action === 'mute')) {
         return res.status(400).json({ error: 'Set the volume with the Apple TV remote' });
-    }
-    if (airplay && action === 'live') {
-        return res.status(400).json({ error: 'Jumping to live is not supported on Apple TV' });
     }
 
     try {

@@ -34,8 +34,9 @@ const isAirPlay = (stream) => stream.deviceType === 'airplay';
 export function renderPosition(stream) {
     renderTimeline(stream);
     const el = playback.position;
+    // An Apple TV doesn't report how far behind live it is: always offer it.
     playback.goLive.classList.toggle('hidden',
-        !stream.live || isAirPlay(stream) || !(stream.currentDelay > GO_LIVE_THRESHOLD_S));
+        !stream.live || (!isAirPlay(stream) && !(stream.currentDelay > GO_LIVE_THRESHOLD_S)));
     if (stream.playerState === 'BUFFERING') {
         el.textContent = 'Buffering…';
         return;
