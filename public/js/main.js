@@ -3,7 +3,8 @@
 import { refreshGraphColors } from './graphs.js';
 import {
     videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay,
-    helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote, bookmarkletLink, shareLinkFormat
+    helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote, bookmarkletLink, shareLinkFormat,
+    bookmarkletCopyBtn, bookmarkletCopied, bookmarksBarKeys
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
 import { fetchCsrfToken, checkSessionStatus, fetchRunningSessions } from './api.js';
@@ -131,10 +132,50 @@ function analyzeSharedUrl(url) {
 }
 
 const homecastUrl = `${window.location.origin}/?url=`;
-bookmarkletLink.href = `javascript:(()=>{window.open(${JSON.stringify(homecastUrl)}+encodeURIComponent(location.href),'homecast')})()`;
+const bookmarklet = `javascript:(()=>{window.open(${JSON.stringify(homecastUrl)}+encodeURIComponent(location.href),'homecast')})()`;
+bookmarkletLink.href = bookmarklet;
 shareLinkFormat.textContent = `${homecastUrl}…`;
 // Clicked here instead of dragged, it would only open HomeCast in HomeCast.
 bookmarkletLink.addEventListener('click', (e) => e.preventDefault());
+
+// The shortcut that shows the bookmarks bar, for this computer.
+const isMac = /mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+bookmarksBarKeys.textContent = isMac ? '\u2318\u21e7B' : 'Ctrl+Shift+B';
+
+// The clipboard API needs HTTPS (or localhost), and HomeCast is usually on a
+// plain http:// LAN address: there, copy the way browsers always have.
+async function copyText(text) {
+    if (window.isSecureContext && navigator.clipboard) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch { /* refused (permissions): try the old way */ }
+    }
+    const field = document.createElement('textarea');
+    field.value = text;
+    field.setAttribute('readonly', '');
+    field.style.position = 'fixed';
+    field.style.opacity = '0';
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand('copy');
+    field.remove();
+    if (!copied) throw new Error('copy refused');
+}
+
+let copiedTimer = null;
+bookmarkletCopyBtn.addEventListener('click', async () => {
+    try {
+        // As written: the link's href property reads back percent-encoded.
+        await copyText(bookmarklet);
+        bookmarkletCopied.textContent = 'Copied. Paste it as the address of a new bookmark.';
+    } catch {
+        bookmarkletCopied.textContent = 'Couldn\u2019t copy it. Right-click \u201cCast with HomeCast\u201d and copy the link address instead.';
+    }
+    bookmarkletCopied.classList.remove('hidden');
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => bookmarkletCopied.classList.add('hidden'), 6000);
+});
 
 helpBtn.addEventListener('click', openHelp);
 helpCloseBtn.addEventListener('click', closeHelp);

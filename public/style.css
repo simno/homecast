@@ -1872,6 +1872,25 @@ select:focus {
   word-break: break-all;
 }
 
+.modal-body kbd {
+  font: 0.875em var(--font-mono);
+  color: var(--md-on-surface);
+  background: var(--md-surface-container-highest);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.bookmarklet-help,
+.bookmarklet-copied {
+  display: block;
+  margin-top: 4px;
+  font: var(--typescale-label-sm);
+  color: var(--md-on-surface-secondary);
+}
+
+.bookmarklet-copied { color: var(--md-primary); }
+
 /* Something to drag to the bookmarks bar: looks like a chip, not a link. */
 .bookmarklet {
   display: inline-block;

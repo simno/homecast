@@ -460,7 +460,9 @@
 
                 <h3>Send pages from other tabs</h3>
                 <ul>
-                    <li><strong>Bookmarklet:</strong> Drag <a id="bookmarklet" class="bookmarklet" href="#" draggable="true">Cast with HomeCast</a> to your bookmarks bar. On a page with a video, click it: HomeCast opens with the page ready to cast.</li>
+                    <li><strong>Bookmarklet:</strong> Drag <a id="bookmarklet" class="bookmarklet" href="#" draggable="true">Cast with HomeCast</a> to your bookmarks bar. On a page with a video, click it: HomeCast opens with the page ready to cast.
+                        <span class="bookmarklet-help">No bookmarks bar? Press <kbd id="bookmarks-bar-keys">Ctrl+Shift+B</kbd> to show it. Or <button id="bookmarklet-copy" class="link-btn" type="button">copy the bookmarklet</button>, add a bookmark, and paste it as the bookmark's address.</span>
+                        <span id="bookmarklet-copied" class="bookmarklet-copied hidden" role="status" aria-live="polite"></span></li>
                     <li><strong>Links and shortcuts:</strong> Opening <code id="share-link-format">/?url=…</code> with a page's address does the same, for phone shortcuts and scripts.</li>
                     <li><strong>Share menu:</strong> Installed as an app over HTTPS, HomeCast appears in your phone's share menu.</li>
                 </ul>

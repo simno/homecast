@@ -195,6 +195,14 @@ test('the help dialog offers a bookmarklet for this server', async (t) => {
     assert.ok(href.includes(JSON.stringify(`${base}/?url=`)), href);
     assert.strictEqual(await page.textContent('#share-link-format'), `${base}/?url=…`);
 
+    // It can be copied instead of dragged; the browser's clipboard holds it.
+    assert.match(await page.textContent('#bookmarks-bar-keys'), /Ctrl\+Shift\+B|\u2318\u21e7B/);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.click('#bookmarklet-copy');
+    await page.waitForSelector('#bookmarklet-copied:not(.hidden)');
+    assert.match(await page.textContent('#bookmarklet-copied'), /^Copied/);
+    assert.strictEqual(await page.evaluate('navigator.clipboard.readText()'), decodeURIComponent(href));
+
     // Clicking it here does nothing; Escape closes the dialog.
     await page.click('#bookmarklet');
     assert.strictEqual(new URL(page.url()).pathname, '/');
@@ -258,4 +266,25 @@ test('a video added to Up next is listed, can be removed, and plays on Play next
     assert.strictEqual(playing(), `${cdn}/v.mp4?n=2`);
     await page.waitForSelector('#app[data-mode="dashboard"]');
     assert.deepStrictEqual(pageErrors, []);
+});
+
+test('the bookmarklet can be copied on a plain http:// LAN address too', async (t) => {
+    if (needBrowser(t)) return;
+    const lanIp = require('../lib/utils').getLocalIp();
+    if (lanIp === '127.0.0.1') return t.skip('no LAN address');
+    // Not a secure context, so there's no clipboard API: the fallback copies.
+    await openPage();
+    await page.goto(`http://${lanIp}:${process.env.PORT}/`);
+    assert.strictEqual(await page.evaluate('window.isSecureContext'), false);
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
+    await page.click('#help-btn');
+    await page.click('#bookmarklet-copy');
+    await page.waitForSelector('#bookmarklet-copied:not(.hidden)');
+    assert.match(await page.textContent('#bookmarklet-copied'), /^Copied/);
+
+    // Read back from a secure page in the same browser.
+    const reader = await page.context().newPage();
+    await reader.goto(base);
+    const copied = await reader.evaluate('navigator.clipboard.readText()');
+    assert.ok(copied.startsWith(`javascript:(()=>{window.open("http://${lanIp}:${process.env.PORT}/?url="`), copied);
 });
