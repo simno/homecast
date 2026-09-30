@@ -15,7 +15,7 @@ const MEDIA = { contentId: 'http://h/proxy?url=x', contentType: 'application/x-m
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 // A castv2 session whose player answers as told and records what it's asked.
-function fakeSession({ statusOk = true, stopThrows = false } = {}) {
+function fakeSession({ statusOk = true, stopThrows = false, loadFails = false } = {}) {
     const calls = [];
     const session = {
         client: { close: () => calls.push('close') },
@@ -32,7 +32,8 @@ function fakeSession({ statusOk = true, stopThrows = false } = {}) {
             },
             load: (media, options, cb) => {
                 calls.push({ load: media, options });
-                cb(null, {});
+                if (loadFails) cb(new Error('LOAD_FAILED'));
+                else cb(null, {});
             }
         },
         subtitles: { tracks: [], activeTrackId: null, wanted: null }
@@ -202,4 +203,32 @@ test('a reload keeps the sideloaded subtitles on', async () => {
     mock.timers.tick(15_001);
     await runRecovery();
     assert.deepStrictEqual(calls[1].options, { autoplay: true, activeTrackIds: [1] });
+});
+
+test('a reload that fails is tried again, up to 3 times', async () => {
+    const { calls } = stalledSession({ loadFails: true });
+    for (let tick = 0; tick < 5; tick++) {
+        mock.timers.tick(15_001);
+        await runRecovery();
+    }
+    const loads = calls.filter(c => c.load);
+    assert.strictEqual(loads.length, 3, `reloads tried: ${loads.length}`);
+    assert.strictEqual(streamRecovery.get(IP).recoveryAttempts, 3);
+});
+
+test('a stream that plays well again after recoveries gets fresh attempts for later stalls', async () => {
+    const { calls } = stalledSession();
+    for (let stall = 0; stall < 4; stall++) {
+        mock.timers.tick(15_001);
+        await runRecovery();
+        // The reload worked: it plays, fetching media, for a few minutes.
+        trackBufferHealth(IP, 'PLAYING');
+        for (let minute = 0; minute < 3; minute++) {
+            mock.timers.tick(60_000);
+            trackStreamActivity(IP);
+            checkStreamStalls();
+        }
+        trackBufferHealth(IP, 'BUFFERING');
+    }
+    assert.strictEqual(calls.filter(c => c.load).length, 4, 'the fourth stall, much later, is recovered too');
 });
