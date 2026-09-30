@@ -43,6 +43,8 @@ on your laptop or phone: once the video has started, you can close the tab.
   rate, buffering and latency, and restarts streams that stall.
 - **4K on Chromecast.** 4K H.264 streams are converted to HEVC on the fly with an Intel, AMD or NVIDIA GPU.
 - **Wake-on-LAN** for devices that are asleep.
+- **Send pages from any tab** with a bookmarklet, a `/?url=` link (for phone shortcuts), or the share menu when
+  HomeCast is installed as an app over HTTPS.
 
 ## Quick start
 

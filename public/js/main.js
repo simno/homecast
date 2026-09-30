@@ -3,7 +3,7 @@
 import { refreshGraphColors } from './graphs.js';
 import {
     videoUrlInput, analyzeBtn, castBtn, stopBtn, stopBtnLabel, addStreamBtn, composeOverlay,
-    helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote
+    helpBtn, helpModal, helpCloseBtn, useProxyCheckbox, advancedNote, bookmarkletLink, shareLinkFormat
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
 import { fetchCsrfToken, checkSessionStatus, fetchRunningSessions } from './api.js';
@@ -106,6 +106,33 @@ stopBtn.addEventListener('click', () => {
 });
 addStreamBtn.addEventListener('click', openComposeOverlay);
 composeOverlay.querySelector('.compose-overlay-backdrop').addEventListener('click', closeComposeOverlay);
+
+// ===== SENDING PAGES FROM ELSEWHERE =====
+// A page handed over in the address, as ?url= (the bookmarklet, shortcuts)
+// or as a share (share_target in manifest.json: apps often put the link in
+// `text`). Taken out of the address so a reload doesn't analyse it again.
+function takeSharedUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.size === 0) return null;
+    window.history.replaceState(null, '', window.location.pathname);
+    return ['url', 'text', 'title']
+        .map(name => params.get(name)?.match(/https?:\/\/\S+/i)?.[0])
+        .find(Boolean) || null;
+}
+
+// Analyse a handed-over page: in the compose form, or over the dashboard
+// when streams are already playing.
+function analyzeSharedUrl(url) {
+    if (state.streams.size > 0) openComposeOverlay();
+    videoUrlInput.value = url;
+    fetchAndAnalyze({ restart: true });
+}
+
+const homecastUrl = `${window.location.origin}/?url=`;
+bookmarkletLink.href = `javascript:(()=>{window.open(${JSON.stringify(homecastUrl)}+encodeURIComponent(location.href),'homecast')})()`;
+shareLinkFormat.textContent = `${homecastUrl}…`;
+// Clicked here instead of dragged, it would only open HomeCast in HomeCast.
+bookmarkletLink.addEventListener('click', (e) => e.preventDefault());
 
 helpBtn.addEventListener('click', openHelp);
 helpCloseBtn.addEventListener('click', closeHelp);
@@ -218,11 +245,14 @@ async function streamsToRestore() {
     return known.size > 0 ? { activeStreams: [...known.values()], activeStreamIp: saved?.activeStreamIp } : null;
 }
 
+const sharedUrl = takeSharedUrl();
+
 window.addEventListener('load', () => {
     // Wait a moment for the device list to arrive via WebSocket
     setTimeout(async () => {
         const toRestore = await streamsToRestore();
-        if (toRestore) syncStreams(toRestore.activeStreams, { activeStreamIp: toRestore.activeStreamIp });
+        if (toRestore) await syncStreams(toRestore.activeStreams, { activeStreamIp: toRestore.activeStreamIp });
+        if (sharedUrl) analyzeSharedUrl(sharedUrl);
     }, 1000);
 });
 

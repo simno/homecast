@@ -125,3 +125,5 @@ export const pinCloseBtn = $('pin-close-btn');
 export const helpBtn = $('help-btn');
 export const helpModal = $('help-modal');
 export const helpCloseBtn = $('help-close-btn');
+export const bookmarkletLink = $('bookmarklet');
+export const shareLinkFormat = $('share-link-format');

@@ -1780,6 +1780,27 @@ select:focus {
 .modal-body li { margin-bottom: 4px; }
 .modal-body strong { color: var(--md-on-surface); font-weight: 500; }
 
+.modal-body code {
+  font: 0.875em var(--font-mono);
+  color: var(--md-on-surface);
+  background: var(--md-surface-container-highest);
+  border-radius: 4px;
+  padding: 1px 5px;
+  word-break: break-all;
+}
+
+/* Something to drag to the bookmarks bar: looks like a chip, not a link. */
+.bookmarklet {
+  display: inline-block;
+  padding: 2px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: grab;
+}
+
 /* ===== PIN MODAL ===== */
 .pin-input-field {
   font: 400 2rem/1 var(--font-mono);

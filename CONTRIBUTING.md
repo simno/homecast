@@ -27,9 +27,12 @@ The frontend in `public/` is plain ES modules with no build step. The server is 
 ```bash
 npm run lint        # ESLint
 npm run typecheck   # TypeScript, over JSDoc types
-npm test            # node:test unit and HTTP tests
+npm test            # node:test unit, HTTP and browser tests
 npm run check       # all three
 ```
+
+The browser tests in `test/ui.test.js` drive the dashboard in Playwright's Chromium. They're skipped when it isn't
+installed: `npx playwright install --only-shell chromium`.
 
 `npm run test:sites` checks the Twitch, X and SpaceX resolvers against the real sites. It isn't part of `npm test`
 because it needs the internet. CI runs it weekly and opens an issue when it fails.

@@ -26,6 +26,18 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["entertainment", "utilities"],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "categories": [
+    "entertainment",
+    "utilities"
+  ],
   "screenshots": []
 }
