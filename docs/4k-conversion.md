@@ -6,6 +6,10 @@ encodes HEVC, HomeCast converts these streams segment by segment as it proxies t
 
 Apple TVs and LG TVs play 4K H.264 themselves, so their streams are never converted.
 
+YouTube's 4K is VP9, not H.264, so it isn't converted either: receivers that decode VP9 play it as it is. "Highest
+available" picks YouTube's H.264 1080p, which every receiver plays; choose 2160p VP9 in the quality menu for 4K. An
+LG G3's Cast receiver plays it; an Android TV box that doesn't decode VP9 refuses to load it.
+
 ## Requirements
 
 Conversion needs an amd64 image (arm64 images don't include FFmpeg) and a GPU that encodes HEVC in hardware, passed

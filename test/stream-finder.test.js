@@ -406,6 +406,56 @@ test('the API streams NDJSON progress, then the result', async () => {
     }
 });
 
+// --- Site resolvers ---
+
+// Points YTDLP_PATH at a script that prints `stdout` (and exits with `code`),
+// for as long as the test runs.
+function fakeYtDlp(t, { stdout = '', code = 0 } = {}) {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'homecast-finder-'));
+    const script = path.join(dir, 'yt-dlp');
+    fs.writeFileSync(path.join(dir, 'out.json'), stdout);
+    fs.writeFileSync(script, `#!/bin/sh\ncat "${dir}/out.json"\nexit ${code}\n`, { mode: 0o755 });
+    const previous = process.env.YTDLP_PATH;
+    process.env.YTDLP_PATH = script;
+    t.after(() => {
+        if (previous === undefined) delete process.env.YTDLP_PATH;
+        else process.env.YTDLP_PATH = previous;
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+}
+
+test('a YouTube page is resolved by yt-dlp, its streams probed like any other', async (t) => {
+    fakeYtDlp(t, {
+        stdout: JSON.stringify({
+            title: 'A video',
+            thumbnail: 'https://i.ytimg.com/vi/x/maxresdefault.jpg',
+            is_live: false,
+            formats: [{ protocol: 'm3u8_native', manifest_url: `${base}/master.m3u8`, url: `${base}/v/720/index.m3u8` }]
+        })
+    });
+    const result = await findStreams('https://www.youtube.com/watch?v=aqz-KE-bpKQ', noBrowser);
+    assert.strictEqual(result.title, 'A video');
+    assert.strictEqual(result.thumbnail, 'https://i.ytimg.com/vi/x/maxresdefault.jpg');
+    assert.deepStrictEqual(result.videos.map(v => [v.url, v.type]), [[`${base}/master.m3u8`, 'hls']]);
+    assert.deepStrictEqual(result.videos[0].qualities.map(q => q.label), ['720p', '360p']);
+});
+
+test('a site resolver\'s refusal becomes the finder\'s answer', async (t) => {
+    fakeYtDlp(t, { code: 1 });
+    process.env.YTDLP_PATH = '/nonexistent/yt-dlp';
+    const missing = await expectFinderError(findStreams('https://youtu.be/aqz-KE-bpKQ', noBrowser), 501);
+    assert.match(missing.message, /needs yt-dlp/);
+});
+
+test('a resolved stream that won\'t load is reported, not passed on', async (t) => {
+    fakeYtDlp(t, { stdout: JSON.stringify({ formats: [{ protocol: 'm3u8_native', manifest_url: `${base}/refused.m3u8` }] }) });
+    const err = await expectFinderError(findStreams('https://youtu.be/aqz-KE-bpKQ', noBrowser), 502);
+    assert.match(err.message, /wouldn't load/);
+});
+
 before(async () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;

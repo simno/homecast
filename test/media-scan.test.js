@@ -262,6 +262,26 @@ test('variants carry their codecs', () => {
     assert.deepStrictEqual(variants.map(v => v.codecs), ['avc1.640028,mp4a.40.2', '']);
 });
 
+test('a height offered in H.264 and VP9 is listed once, as H.264; VP9/AV1-only heights say so', () => {
+    const master = [
+        '#EXTM3U',
+        '#EXT-X-STREAM-INF:BANDWIDTH=20000000,RESOLUTION=3840x2160,FRAME-RATE=60,CODECS="vp09.00.51.08,mp4a.40.2"',
+        'vp9-2160.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=9000000,RESOLUTION=2560x1440,CODECS="av01.0.12M.08,mp4a.40.2"',
+        'av1-1440.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080,FRAME-RATE=60,CODECS="vp09.00.41.08,mp4a.40.2"',
+        'vp9-1080.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080,FRAME-RATE=60,CODECS="avc1.64002A,mp4a.40.2"',
+        'h264-1080.m3u8'
+    ].join('\n');
+    const variants = scan.parseHlsVariants(master, 'https://cdn.example/master.m3u8');
+    assert.deepStrictEqual(variants.map(v => [v.label, v.url.split('/').pop()]), [
+        ['2160p60 VP9', 'vp9-2160.m3u8'],
+        ['1440p AV1', 'av1-1440.m3u8'],
+        ['1080p60', 'h264-1080.m3u8']
+    ]);
+});
+
 test('media playlists have no variants', () => {
     assert.deepStrictEqual(scan.parseHlsVariants('#EXTM3U\n#EXTINF:4,\na.ts\n', 'https://x.example/'), []);
 });

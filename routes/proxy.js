@@ -31,6 +31,7 @@ const {
 } = require('../lib/proxy');
 const transcoder = require('../lib/transcode');
 const { fixSegmentTiming } = require('../lib/h264-timing');
+const { isPackedAudio, packedAudioToTs } = require('../lib/packed-audio');
 const { getBufferHealthStats } = require('../lib/stats');
 const { rewriteMpd, describeMpd, dashSegmentUrl, upstreamFromDashPath } = require('../lib/dash');
 const { toWebVtt } = require('../lib/subtitles');
@@ -123,7 +124,7 @@ function planTranscode(m3u8, quality) {
     return 'media';
 }
 
-function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true, device } = {}) {
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true, device, audio = false } = {}) {
     if (inFlightPlaylistFetches.has(cacheKey)) {
         return inFlightPlaylistFetches.get(cacheKey);
     }
@@ -159,19 +160,24 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
 
         // Carry quality onto child playlist requests so variant and segment
         // fetches stay consistent (and cache cleanly), and flag child playlists
-        // so extensionless ones are still rewritten when they come back through.
+        // so extensionless ones are still rewritten when they come back through,
+        // and everything else as media, never a playlist: YouTube's segment
+        // URLs carry /playlist/index.m3u8/ among their signed parameters.
         // Conversion follows the video variant and its segments, not separate
         // audio or subtitle renditions (tag URIs).
         const segmentUrls = [];
-        let rewrittenM3u8 = rewritePlaylist(filteredM3u8, baseUrl, (childUrl, isPlaylist, isTagUri) => {
+        // An audio rendition's playlist, and everything it lists, is marked
+        // as audio (see serveAudioSegment).
+        let rewrittenM3u8 = rewritePlaylist(filteredM3u8, baseUrl, (childUrl, isPlaylist, isTagUri, tag) => {
             if (plan === 'media' && !isPlaylist && !isTagUri) segmentUrls.push(childUrl);
             return buildProxyUrl(req.headers.host, {
                 url: childUrl,
                 referer,
                 quality,
-                type: isPlaylist ? 'hls' : undefined,
+                type: isPlaylist ? 'hls' : 'segment',
                 transcode: plan && !isTagUri ? 'hevc' : undefined,
-                device
+                device,
+                audio: audio || (isPlaylist && /TYPE=AUDIO/i.test(tag || ''))
             });
         });
         if (plan === 'media') {
@@ -469,6 +475,37 @@ async function serveTimedSegment(res, response, context) {
     noteSegmentDone({ deviceIp, stats, url, bytes: body.length, segmentSkipped });
 }
 
+// Serve an audio rendition's segment to a Cast receiver: packed audio
+// (YouTube's: an ID3 timestamp, then bare AAC frames) rewrapped as MPEG-TS,
+// which receivers expect of an audio rendition; anything else piped through.
+async function serveAudioSegment(res, response, context) {
+    const length = parseInt(response.headers['content-length'] || '0', 10);
+    if (length > MAX_TIMED_SEGMENT_BYTES) return pipeUpstream(res, response, context);
+
+    const first = await firstChunk(response.data);
+    if (!first) return res.status(response.status).end();
+    if (!isPackedAudio(first)) {
+        response.data = prepend(response.data, first);
+        return pipeUpstream(res, response, context);
+    }
+    const { chunks, complete } = await readUpTo(response.data, first, MAX_TIMED_SEGMENT_BYTES);
+    const packed = Buffer.concat(chunks);
+    const ts = complete ? packedAudioToTs(packed) : null;
+    if (!ts) {
+        response.data = prepend(response.data, packed);
+        return pipeUpstream(res, response, context);
+    }
+
+    const { deviceIp, stats, url, segmentSkipped } = context;
+    stats.segmentCount++;
+    stats.totalBytes += ts.length;
+    res.status(200);
+    res.set('Content-Type', 'video/mp2t');
+    res.header('Access-Control-Allow-Origin', '*');
+    res.send(ts);
+    noteSegmentDone({ deviceIp, stats, url, bytes: ts.length, segmentSkipped });
+}
+
 // Fetch an MPD and hand the receiver a copy whose every URL points back at us.
 async function serveDashManifest(req, res, { url, referer, quality, headers, stats, device }) {
     const response = await fetchUpstream(url, headers, {
@@ -737,7 +774,10 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         // `type` comes from the extractor (it sniffed the response) or from a
         // parent manifest, and covers manifests whose URL doesn't say so.
-        const isDash = req.query.type === 'dash' || (req.query.type !== 'hls' && /\.mpd(?:$|[?;])/i.test(url));
+        // `type` says what a URL is when the proxy wrote it into a playlist;
+        // otherwise its name has to.
+        const named = req.query.type === undefined;
+        const isDash = req.query.type === 'dash' || (named && /\.mpd(?:$|[?;])/i.test(url));
         if (isDash) {
             const device = req.query.device === 'webos' ? 'webos' : undefined;
             return await serveDashManifest(req, res, { url, referer, quality, headers, stats, device });
@@ -749,7 +789,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             return await serveConvertedInit(res, { url, headers });
         }
 
-        const isPlaylist = req.query.type === 'hls' || url.includes('.m3u8') || url.includes('playlist');
+        const isPlaylist = req.query.type === 'hls' || (named && (url.includes('.m3u8') || url.includes('playlist')));
         const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : '';
 
         if (transcode && !isPlaylist) {
@@ -760,7 +800,8 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         if (isPlaylist) {
             // Quality is part of the key: the same upstream master URL yields
             // different rewritten playlists per requested quality.
-            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}`;
+            const audio = req.query.audio === '1';
+            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}${audio ? '|a' : ''}`;
             const cached = playlistCache.get(cacheKey);
 
             const cacheTTL = cached?.ttl;
@@ -781,7 +822,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { device });
+            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { device, audio });
 
             if (!result.ok) {
                 console.error(`[Proxy] Upstream returned ${result.status} for ${url}`);
@@ -958,6 +999,10 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
 
         if (device === 'webos' && !req.headers.range) {
             return await serveTimedSegment(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
+        }
+        // LG's browser player reads packed audio itself; Cast receivers don't.
+        if (req.query.audio === '1' && !req.headers.range) {
+            return await serveAudioSegment(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
         }
         pipeUpstream(res, response, { deviceIp, stats, url: currentUrl, segmentSkipped });
 

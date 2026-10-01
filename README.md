@@ -98,7 +98,12 @@ npm start
 docker build -t homecast .                              # full
 docker build --build-arg VARIANT=lite -t homecast .     # without the headless browser
 docker build --build-arg TRANSCODE=none -t homecast .   # without FFmpeg
+docker build --build-arg YTDLP=none -t homecast .       # without yt-dlp (no YouTube)
 ```
+
+The image takes the latest [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it's built. YouTube changes often enough to
+break older yt-dlp releases, so if YouTube links stop working, pull a newer image or rebuild yours.
+`--build-arg YTDLP=2026.08.19` pins a release.
 
 </details>
 
@@ -111,7 +116,8 @@ docker build --build-arg TRANSCODE=none -t homecast .   # without FFmpeg
 
 The two images handle direct links, HLS/DASH, Twitch and ordinary embedded players the same way. `lite` can't find
 streams on pages that only reveal them after running JavaScript. When that may be the reason nothing was found,
-Analyze says so. amd64 images include FFmpeg for [4K conversion](docs/4k-conversion.md). arm64 images don't.
+Analyze says so. Both include yt-dlp for YouTube (about 40 MB of each). amd64 images include FFmpeg for
+[4K conversion](docs/4k-conversion.md). arm64 images don't.
 
 ## Devices
 
@@ -127,11 +133,18 @@ For pairing, the LG permission prompt and per-device limits, see [docs/devices.m
 
 - Direct video files (MP4, WebM) and HLS or DASH streams
 - Web pages whose player uses one of those, including players in iframes and players that only load in a browser
-- Sites with their own handling in the code: **Twitch** (live and VODs), **X / Periscope** broadcasts and
-  **SpaceX** launch pages
+- Sites with their own handling in the code: **Twitch** (live and VODs), **Kick** (live, past broadcasts and
+  clips), **Dailymotion**, **Rumble**, **X / Periscope** broadcasts, **SpaceX** launch pages and the **NASA+**
+  live channel
+- **YouTube** videos and live streams, through [yt-dlp](https://github.com/yt-dlp/yt-dlp) (in the Docker images;
+  when running from source, install a recent yt-dlp and keep it updated). Sponsors, self-promotion and subscribe
+  reminders are skipped using [SponsorBlock](https://sponsor.ajay.app). Chromecasts need the proxy (on by default)
+  for YouTube's audio
+- Tested and working through the general handling: Vimeo, Streamable, PeerTube, Owncast, Bluesky, Reddit, the
+  Internet Archive and NASA+ videos
 
 HomeCast can't play DRM-protected content (Netflix, Disney+ and other subscription services, or DASH with
-`ContentProtection`). It also can't play YouTube or MJPEG webcam streams. These were tested on a limited number of
+`ContentProtection`). It also can't play MJPEG webcam streams. These were tested on a limited number of
 sites, so other sites may well not work. Issues saying which sites work or don't are welcome. For how streams are
 found, see [docs/how-it-works.md](docs/how-it-works.md).
 

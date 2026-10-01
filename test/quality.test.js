@@ -127,3 +127,56 @@ b.m3u8`;
     check('1080p H.264 is still eligible for highest',
         filterMasterPlaylist(twitchMaster, 'highest').includes('chunked/index.m3u8'));
 }
+
+// YouTube's shape: H.264 up to 1080p and VP9 up to 4K, audio as renditions.
+const youtubeMaster = `#EXTM3U
+#EXT-X-INDEPENDENT-SEGMENTS
+#EXT-X-MEDIA:URI="https://yt.example/audio/233.m3u8",TYPE=AUDIO,GROUP-ID="233",NAME="Default",DEFAULT=YES,AUTOSELECT=YES
+#EXT-X-MEDIA:URI="https://yt.example/audio/234.m3u8",TYPE=AUDIO,GROUP-ID="234",NAME="Default",DEFAULT=YES,AUTOSELECT=YES
+#EXT-X-STREAM-INF:BANDWIDTH=4500000,CODECS="avc1.64002A,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=60,AUDIO="234"
+https://yt.example/h264/1080.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=4200000,CODECS="vp09.00.41.08,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=60,AUDIO="234"
+https://yt.example/vp9/1080.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=6000000,CODECS="vp09.00.41.08,mp4a.40.2",RESOLUTION=1920x1080,FRAME-RATE=60,AUDIO="234"
+https://yt.example/vp9/1080-hi.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=20000000,CODECS="vp09.00.51.08,mp4a.40.2",RESOLUTION=3840x2160,FRAME-RATE=60,AUDIO="234"
+https://yt.example/vp9/2160.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=500000,CODECS="avc1.4D4015,mp4a.40.5",RESOLUTION=426x240,FRAME-RATE=30,AUDIO="233"
+https://yt.example/h264/240.m3u8`;
+
+// --- VP9/AV1 beside H.264: the automatic pick takes the codec every receiver has ---
+{
+    const out = filterMasterPlaylist(youtubeMaster, 'highest');
+    check('highest prefers H.264 1080p over VP9 4K', out.includes('h264/1080.m3u8') && !out.includes('vp9/'));
+    check('highest keeps the chosen variant\'s audio rendition', out.includes('GROUP-ID="234"'));
+    const converted = filterMasterPlaylist(youtubeMaster, 'highest', { convertible: true });
+    check('a converted pick is H.264 too', converted.includes('h264/1080.m3u8') && !converted.includes('vp9/'));
+}
+
+// --- an explicit height breaks ties toward H.264, and still reaches VP9-only heights ---
+{
+    const tie = filterMasterPlaylist(youtubeMaster, '1080');
+    check('1080 picks the H.264 variant over higher-bandwidth VP9', tie.includes('h264/1080.m3u8') && !tie.includes('vp9/'));
+    const uhd = filterMasterPlaylist(youtubeMaster, '2160');
+    check('2160 picks the VP9 4K variant', uhd.includes('vp9/2160.m3u8') && !uhd.includes('h264/'));
+}
+
+// --- VP9 only: still played ---
+{
+    const vp9Only = youtubeMaster.split('\n').filter((line, i, lines) =>
+        !line.includes('avc1') && !(lines[i - 1] || '').includes('avc1')).join('\n');
+    const out = filterMasterPlaylist(vp9Only, 'highest');
+    check('with no H.264 variant, highest takes the top VP9 one', out.includes('vp9/2160.m3u8'));
+}
+
+// --- auto: only variants a Cast receiver can switch between ---
+{
+    const out = filterMasterPlaylist(youtubeMaster, 'auto');
+    check('auto drops VP9 beside H.264', !out.includes('vp9/'));
+    check('auto keeps the H.264 variants sharing the best one\'s audio', out.includes('h264/1080.m3u8') && !out.includes('h264/240.m3u8'));
+    check('auto keeps that audio rendition only', out.includes('GROUP-ID="234"') && !out.includes('GROUP-ID="233"'));
+    const sameAudio = youtubeMaster.replace('AUDIO="233"', 'AUDIO="234"');
+    const vp9Free = sameAudio.split('\n').filter((line, i, lines) =>
+        !line.includes('vp09') && !(lines[i - 1] || '').includes('vp09')).join('\n');
+    check('auto leaves a master of one codec and one audio rendition unchanged', filterMasterPlaylist(vp9Free, 'auto') === vp9Free);
+}

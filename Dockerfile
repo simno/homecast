@@ -35,6 +35,33 @@ RUN if [ "$TRANSCODE" != "none" ] && [ "$TARGETARCH" = "amd64" ]; then \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
+# yt-dlp, for YouTube (lib/youtube.js): its standalone build, which brings
+# its own Python, checked against the release's SHA-256 list. It answers
+# YouTube's challenges by running them in Node, already here. YouTube breaks
+# older yt-dlp releases every few weeks, so the default takes the latest;
+# YTDLP=2026.08.19 pins one, YTDLP=none leaves it out (~40MB smaller).
+ARG YTDLP=latest
+RUN if [ "$YTDLP" != "none" ]; then \
+        case "$TARGETARCH" in \
+            amd64) asset=yt-dlp_linux ;; \
+            arm64) asset=yt-dlp_linux_aarch64 ;; \
+            *) echo "No yt-dlp build for $TARGETARCH" >&2 && exit 1 ;; \
+        esac && \
+        base=$([ "$YTDLP" = "latest" ] && echo "https://github.com/yt-dlp/yt-dlp/releases/latest/download" \
+            || echo "https://github.com/yt-dlp/yt-dlp/releases/download/$YTDLP") && \
+        ASSET="$asset" BASE="$base" node -e " \
+            const { createHash } = require('crypto'); \
+            const get = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(url + ': HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); }; \
+            (async () => { \
+                const [binary, sums] = await Promise.all([get(process.env.BASE + '/' + process.env.ASSET), get(process.env.BASE + '/SHA2-256SUMS')]); \
+                const line = sums.toString().split('\n').find(l => l.trim().endsWith(' ' + process.env.ASSET)); \
+                if (!line) throw new Error('No checksum listed for ' + process.env.ASSET); \
+                if (createHash('sha256').update(binary).digest('hex') !== line.split(/\s+/)[0]) throw new Error('Checksum mismatch for ' + process.env.ASSET); \
+                require('fs').writeFileSync('/usr/local/bin/yt-dlp', binary, { mode: 0o755 }); \
+            })().catch(e => { console.error(e.message); process.exit(1); });" && \
+        yt-dlp --version; \
+    fi
+
 # Install production dependencies. For full, add Chromium and the system
 # libraries it needs (--with-deps: libnss3, libgbm, fonts, ...); this must run
 # as root, before switching user. --only-shell skips the headed Chromium build
