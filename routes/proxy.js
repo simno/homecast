@@ -23,6 +23,7 @@ const { markBroadcastEnded } = require('../lib/cast');
 const {
     tryNextSegment,
     filterMasterPlaylist,
+    trimLivePlaylist,
     rewritePlaylist,
     buildProxyUrl,
     shouldSendReferer,
@@ -38,9 +39,12 @@ const { toWebVtt } = require('../lib/subtitles');
 
 const router = express.Router();
 
+// Per client. A YouTube live stream is one-second segments with audio apart,
+// and its two playlists reloaded as often: four or more requests a second,
+// with the receiver's probes on top. At 100 a minute it was cut off in 20s.
 const proxyLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 100,
+    max: 600,
     message: 'Too many proxy requests, please try again later',
     standardHeaders: true,
     legacyHeaders: false
@@ -153,7 +157,7 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
         const originalM3u8 = Buffer.concat(chunks).toString('utf8');
         const baseUrl = new URL(url);
         // An LG TV decodes 4K H.264 itself: nothing needs filtering out for it.
-        let filteredM3u8 = filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode || device === 'webos' });
+        let filteredM3u8 = trimLivePlaylist(filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode || device === 'webos' }));
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
         const plan = transcode ? planTranscode(filteredM3u8, quality) : null;
         if (plan === 'master') filteredM3u8 = transcoder.declareHevc(filteredM3u8);
