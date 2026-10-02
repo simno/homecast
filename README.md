@@ -34,8 +34,8 @@ on your laptop or phone: once the video has started, you can close the tab.
 
 - **Stream detection.** Finds the stream behind a page: player markup, embedded JSON, iframes, player scripts, and as
   a last resort a headless browser that watches the page's network requests.
-- **HLS, DASH, MP4 and WebM**, live and on demand, with a quality picker and subtitles (from the page, from the stream,
-  or from a WebVTT/SRT URL).
+- **HLS, DASH, MP4 and WebM**, live and on demand, with a quality picker, subtitles (from the page, from the stream,
+  or from a WebVTT/SRT URL) and, for streams with audio in several languages, an audio picker.
 - **Three kinds of receiver**, discovered automatically over mDNS and SSDP: Chromecast and Cast TVs, Apple TV (AirPlay,
   including PIN pairing) and LG webOS TVs.
 - **Live streams** start near the live edge. You can go back along the timeline and jump to live again.
@@ -138,8 +138,9 @@ For pairing, the LG permission prompt and per-device limits, see [docs/devices.m
   live channel
 - **YouTube** videos and live streams, through [yt-dlp](https://github.com/yt-dlp/yt-dlp) (in the Docker images;
   when running from source, install a recent yt-dlp and keep it updated). Sponsors, self-promotion and subscribe
-  reminders are skipped using [SponsorBlock](https://sponsor.ajay.app). Chromecasts need the proxy (on by default)
-  for YouTube's audio
+  reminders are skipped using [SponsorBlock](https://sponsor.ajay.app) (other categories can be picked under
+  Advanced). Auto-dubbed videos play in their original language unless you pick another. Chromecasts need the proxy
+  (on by default) for YouTube's audio
 - Tested and working through the general handling: Vimeo, Streamable, PeerTube, Owncast, Bluesky, Reddit, the
   Internet Archive and NASA+ videos
 

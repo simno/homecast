@@ -2,6 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { findStreams, FinderError } = require('../lib/stream-finder');
 const { validateProxyUrl } = require('../lib/security');
+const { CATEGORY_NAMES, categories, youTubeVideoId } = require('../lib/sponsorblock');
 
 const router = express.Router();
 
@@ -38,7 +39,8 @@ function cacheResult(url, result) {
 }
 
 // --- API: Extract Video URL ---
-// Responds with JSON { videos, title } by default. A client that sends
+// Responds with JSON { videos, title, sponsorBlock? } by default (sponsorBlock:
+// a YouTube video's skippable categories, [{ id, name, skip }]). A client that sends
 // `Accept: application/x-ndjson` gets progress lines ({ progress }) while the
 // search runs, then one final line holding the result or { error, status }.
 router.post('/api/extract', apiLimiter, async (req, res) => {
@@ -94,6 +96,16 @@ router.post('/api/extract', apiLimiter, async (req, res) => {
                 onProgress: streaming ? (progress) => send({ progress }) : undefined
             });
             cacheResult(url, result);
+        }
+
+        // A YouTube video's sponsors are skipped: say which categories, and
+        // which this server skips unless the page picks others.
+        if (youTubeVideoId(url)) {
+            const skipped = categories();
+            result = {
+                ...result,
+                sponsorBlock: Object.entries(CATEGORY_NAMES).map(([id, name]) => ({ id, name, skip: skipped.includes(id) }))
+            };
         }
 
         console.log(`[Extract] Found ${result.videos.length} stream(s) at ${url} in ${Date.now() - started}ms`);

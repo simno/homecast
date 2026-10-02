@@ -151,6 +151,12 @@
                                        placeholder="https://example.com/subtitles.vtt or .srt" aria-label="Subtitle file URL">
                                 <div id="subtitle-note" class="field-note hidden"></div>
                             </div>
+                            <!-- Only for streams with audio in more than one language -->
+                            <div id="audio-select-row" class="quality-row hidden">
+                                <label class="field-label" for="audio-select">Audio</label>
+                                <select id="audio-select" aria-describedby="audio-note"></select>
+                                <div id="audio-note" class="field-note hidden">Picking the audio needs the proxy (Advanced).</div>
+                            </div>
                         </div>
                     </div>
 
@@ -163,6 +169,12 @@
                                 <span>Proxy stream</span>
                             </label>
                             <p id="proxy-note" class="field-note">Recommended. Fixes CORS errors and enables HLS streaming. Turn it off only if the device can reach the video directly.</p>
+                            <!-- YouTube videos only (lib/sponsorblock.js) -->
+                            <fieldset id="sponsorblock-options" class="sponsorblock hidden" aria-describedby="sponsorblock-note">
+                                <legend class="field-label">SponsorBlock: skip</legend>
+                                <div id="sponsorblock-categories" class="sponsorblock-categories"></div>
+                                <p id="sponsorblock-note" class="field-note">Segments of YouTube videos that SponsorBlock users have marked.</p>
+                            </fieldset>
                         </div>
                     </details>
 

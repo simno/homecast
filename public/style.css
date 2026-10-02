@@ -939,6 +939,23 @@ body {
 
 .advanced-body .field-note { margin: 4px 0 0 30px; }
 
+.sponsorblock {
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.sponsorblock legend { padding: 0; margin: 0 0 8px; }
+
+.sponsorblock-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px 16px;
+}
+
+.advanced-body .sponsorblock .field-note { margin-left: 0; }
+
 .compose-actions {
   margin-top: 20px;
 }

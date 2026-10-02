@@ -23,6 +23,8 @@ const { markBroadcastEnded } = require('../lib/cast');
 const {
     tryNextSegment,
     filterMasterPlaylist,
+    selectAudio,
+    isLanguageTag,
     trimLivePlaylist,
     rewritePlaylist,
     buildProxyUrl,
@@ -128,7 +130,7 @@ function planTranscode(m3u8, quality) {
     return 'media';
 }
 
-function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true, device, audio = false } = {}) {
+function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { cache = true, device, audio = false, lang = null } = {}) {
     if (inFlightPlaylistFetches.has(cacheKey)) {
         return inFlightPlaylistFetches.get(cacheKey);
     }
@@ -157,7 +159,7 @@ function fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, 
         const originalM3u8 = Buffer.concat(chunks).toString('utf8');
         const baseUrl = new URL(url);
         // An LG TV decodes 4K H.264 itself: nothing needs filtering out for it.
-        let filteredM3u8 = trimLivePlaylist(filterMasterPlaylist(originalM3u8, quality, { convertible: !!transcode || device === 'webos' }));
+        let filteredM3u8 = trimLivePlaylist(filterMasterPlaylist(selectAudio(originalM3u8, lang), quality, { convertible: !!transcode || device === 'webos' }));
         const isLive = !filteredM3u8.includes('#EXT-X-ENDLIST');
         const plan = transcode ? planTranscode(filteredM3u8, quality) : null;
         if (plan === 'master') filteredM3u8 = transcoder.declareHevc(filteredM3u8);
@@ -511,7 +513,7 @@ async function serveAudioSegment(res, response, context) {
 }
 
 // Fetch an MPD and hand the receiver a copy whose every URL points back at us.
-async function serveDashManifest(req, res, { url, referer, quality, headers, stats, device }) {
+async function serveDashManifest(req, res, { url, referer, quality, headers, stats, device, lang }) {
     const response = await fetchUpstream(url, headers, {
         method: 'get',
         responseType: 'text',
@@ -533,10 +535,11 @@ async function serveDashManifest(req, res, { url, referer, quality, headers, sta
     const host = req.headers.host;
     const rewritten = rewriteMpd(response.data, mpdUrl, {
         quality,
+        audioLanguage: lang,
         // An LG TV decodes 4K H.264 itself: nothing needs filtering out for it.
         convertible: device === 'webos',
         toSegmentUrl: (segmentUrl) => dashSegmentUrl(host, segmentUrl, referer),
-        toManifestUrl: (manifestUrl) => buildProxyUrl(host, { url: manifestUrl, referer, quality, type: 'dash', device })
+        toManifestUrl: (manifestUrl) => buildProxyUrl(host, { url: manifestUrl, referer, quality, type: 'dash', device, lang })
     });
     if (!rewritten) {
         return res.status(502).json({ error: 'Upstream did not return a DASH manifest' });
@@ -738,6 +741,8 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
     // so the highest available variant plays on every site unless the user
     // explicitly picks another quality (or 'auto' for adaptive bitrate).
     const quality = req.query.quality || 'highest';
+    // The audio language picked when casting, for a master or an MPD.
+    const lang = isLanguageTag(req.query.lang) ? req.query.lang : null;
     const clientIp = req.ip || req.connection.remoteAddress;
 
     console.log(`[Proxy] Request from ${clientIp} for: ${url?.substring(0, 80)}...`);
@@ -784,7 +789,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
         const isDash = req.query.type === 'dash' || (named && /\.mpd(?:$|[?;])/i.test(url));
         if (isDash) {
             const device = req.query.device === 'webos' ? 'webos' : undefined;
-            return await serveDashManifest(req, res, { url, referer, quality, headers, stats, device });
+            return await serveDashManifest(req, res, { url, referer, quality, headers, stats, device, lang });
         }
 
         const transcode = req.query.transcode === 'hevc' && transcoder.isAvailable() ? 'hevc' : undefined;
@@ -805,7 +810,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
             // Quality is part of the key: the same upstream master URL yields
             // different rewritten playlists per requested quality.
             const audio = req.query.audio === '1';
-            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}${audio ? '|a' : ''}`;
+            const cacheKey = `${url}|q=${quality}${transcode ? '|t=hevc' : ''}${device ? `|d=${device}` : ''}${audio ? '|a' : ''}${lang ? `|l=${lang}` : ''}`;
             const cached = playlistCache.get(cacheKey);
 
             const cacheTTL = cached?.ttl;
@@ -826,7 +831,7 @@ router.get('/proxy', proxyLimiter, async (req, res) => {
                 console.log(`[Proxy] No cache entry, fetching: ${url.substring(0, 80)}...`);
             }
 
-            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { device, audio });
+            const result = await fetchAndRewritePlaylist(cacheKey, url, quality, headers, req, referer, transcode, { device, audio, lang });
 
             if (!result.ok) {
                 console.error(`[Proxy] Upstream returned ${result.status} for ${url}`);

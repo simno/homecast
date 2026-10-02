@@ -81,3 +81,10 @@ After you press Analyze, the **Subtitles** picker lists what was found with the 
 
 Subtitle files are always fetched through HomeCast, because receivers only accept them with CORS headers. On the
 way, SRT is converted to WebVTT. The last language you picked becomes the default for the next video.
+
+## Audio languages
+
+When an HLS or DASH stream has audio in more than one language (YouTube's dubbed videos, multi-language broadcasts),
+an **Audio** picker appears under Subtitles. It starts on the original audio where the stream marks one, otherwise on
+the stream's own default. HomeCast's proxy hands the receiver only the language you picked, so this works on every
+device, but needs the proxy (always used for LG webOS). The language is chosen when casting.

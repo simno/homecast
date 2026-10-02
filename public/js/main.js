@@ -12,7 +12,8 @@ import { redrawActiveGraphs, startDashboardTimers, renderDashboard, renderFailur
 import {
     createStreamEntry, removeStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
 } from './streams.js';
-import { updateDeviceList, findDeviceName, onDeviceChange, wireDeviceControls } from './devices.js';
+import { updateDeviceList, findDeviceName, onDeviceChange, wireDeviceControls, selectedDeviceType } from './devices.js';
+import { renderAudioNote } from './audio.js';
 import {
     resetComposeForm, openComposeOverlay, closeComposeOverlay, isComposeOverlayOpen,
     checkReady, onDeviceChanged, fetchAndAnalyze, startCasting
@@ -80,6 +81,7 @@ wireQueueControls({ onAdd: (ip) => openComposeOverlay({ queueFor: ip }) });
 // collapsed section when it's been turned off.
 useProxyCheckbox.addEventListener('change', () => {
     advancedNote.classList.toggle('hidden', useProxyCheckbox.checked);
+    renderAudioNote(selectedDeviceType());
 });
 
 analyzeBtn.addEventListener('click', () => fetchAndAnalyze());

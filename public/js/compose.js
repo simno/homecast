@@ -1,4 +1,4 @@
-// The compose form: analyze a URL, pick a stream, quality and subtitles, cast.
+// The compose form: analyze a URL, pick a stream, quality, subtitles and audio, cast.
 // In setup mode it's the page; in dashboard mode it opens as an overlay.
 import {
     composePanel, composeOverlay, composeCard, composeTitle, composeSubtitle, videoUrlInput, analyzeBtn, analyzeBtnLabel,
@@ -20,6 +20,8 @@ import { showPinPrompt } from './pairing.js';
 import {
     populateSubtitleOptions, subtitleChoiceReady, selectedSubtitle, rememberSubtitleChoice
 } from './subtitles.js';
+import { populateAudioOptions, renderAudioNote, selectedAudio } from './audio.js';
+import { populateSponsorBlockOptions, selectedSponsorBlock } from './sponsorblock.js';
 import { addRecent, rememberDevice, renderRecent, cannotPlayConverted } from './recent.js';
 
 // ===== FORM STATE =====
@@ -32,6 +34,8 @@ export function resetComposeForm() {
     statusCard.classList.add('hidden');
     showPreview(null);
     populateSubtitleOptions(null);
+    populateAudioOptions(null);
+    populateSponsorBlockOptions(null);
     setCastButton({ busy: false });
     castBtn.disabled = true;
     state.compose.analyzedStreams = [];
@@ -93,6 +97,7 @@ export function checkReady() {
 export function onDeviceChanged() {
     populateQualityOptions(selectedStream(), { keep: true });
     populateSubtitleOptions(selectedStream(), selectedDeviceType());
+    renderAudioNote(selectedDeviceType());
     checkReady();
 }
 
@@ -187,6 +192,7 @@ function showAnalyzeResult(data) {
 
     if (playableCount > 0) {
         state.compose.analyzedStreams = videos;
+        populateSponsorBlockOptions(data.sponsorBlock);
         displayStreamOptions(videos);
         updateStatus(`Found ${playableCount} stream${playableCount > 1 ? 's' : ''}`, 'success');
         checkReady();
@@ -232,6 +238,8 @@ export async function fetchAndAnalyze({ restart = false } = {}) {
     qualitySelectRow.classList.add('hidden');
     showPreview(null);
     populateSubtitleOptions(null);
+    populateAudioOptions(null);
+    populateSponsorBlockOptions(null);
     checkReady();
     renderRecent();
 
@@ -306,6 +314,10 @@ function displayStreamOptions(videos) {
             const cc = badges.appendChild(badge('subtitles', 'CC'));
             cc.title = 'Subtitles available';
         }
+        if (video.audioTracks?.length > 1) {
+            const audio = badges.appendChild(badge('audio', `${video.audioTracks.length} AUDIO`));
+            audio.title = 'Audio in several languages';
+        }
 
         if (video.reason) option.title = video.reason;
 
@@ -330,6 +342,7 @@ function displayStreamOptions(videos) {
 function selectStream(video) {
     populateQualityOptions(video);
     populateSubtitleOptions(video, selectedDeviceType());
+    populateAudioOptions(video, selectedDeviceType());
     checkReady();
 }
 
@@ -480,7 +493,9 @@ export async function startCasting() {
         quality,
         transcode,
         type: stream.type,
-        subtitle: selectedSubtitle()
+        subtitle: selectedSubtitle(),
+        audio: selectedAudio(),
+        sponsorBlock: selectedSponsorBlock()
     }, {
         loadingMessage: state.compose.queueFor ? 'Adding to the queue…' : 'Connecting to device...',
         allowPairingRetry: true,

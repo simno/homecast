@@ -17,7 +17,7 @@ try {
     languageNames = new Intl.DisplayNames([navigator.language, 'en'], { type: 'language' });
 } catch { /* old browser: raw tags it is */ }
 
-function languageName(tag) {
+export function languageName(tag) {
     if (!tag || tag === 'und') return null;
     try {
         return languageNames?.of(tag) || tag;

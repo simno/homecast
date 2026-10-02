@@ -17,7 +17,7 @@ HomeCast is configured with environment variables. The defaults suit most setups
 | `WEBOS_KEY_STORE`            | `./data/webos-keys.json`        | Where the keys LG TVs give HomeCast are stored |
 | `PLAYWRIGHT_BROWSERS_PATH`   | auto-detected                   | Path to Playwright's browser binaries |
 | `YTDLP_PATH`                 | `yt-dlp` on the `PATH`          | The [yt-dlp](https://github.com/yt-dlp/yt-dlp) that YouTube links are resolved with. Without it, YouTube isn't supported |
-| `SPONSORBLOCK_CATEGORIES`    | `sponsor,selfpromo,interaction` | [SponsorBlock](https://sponsor.ajay.app) categories skipped in YouTube videos, comma-separated (also `intro`, `outro`, `preview`, `hook`, `filler`, `music_offtopic`). `none` turns skipping off |
+| `SPONSORBLOCK_CATEGORIES`    | `sponsor,selfpromo,interaction` | [SponsorBlock](https://sponsor.ajay.app) categories skipped in YouTube videos, comma-separated (also `intro`, `outro`, `preview`, `hook`, `filler`, `music_offtopic`). `none` turns skipping off. These are the defaults under Advanced, where each YouTube cast can pick its own |
 
 ### 4K conversion
 
