@@ -1,6 +1,6 @@
 {
   "name": "homecast",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Self-hosted casting from web pages to Chromecast, Apple TV and LG TVs",
   "main": "server.js",
   "scripts": {
