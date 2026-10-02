@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { isYouTubeUrl, resolveYouTube, pickStreams, ytDlpReason } = require('../lib/youtube');
+const { isYouTubeUrl, resolveYouTube, pickStreams, pickSubtitles, ytDlpReason } = require('../lib/youtube');
 
 const MASTER = 'https://manifest.googlevideo.com/api/manifest/hls_variant/id/abc/file/index.m3u8';
 const info = {
@@ -78,6 +78,31 @@ test('the HLS master comes first, then the best progressive MP4 with sound', () 
     assert.deepStrictEqual(pickStreams({}), []);
 });
 
+test('captions: the uploader\'s, then each audio track\'s speech recognition, original language first; no translations', () => {
+    const vtt = (url, name) => [{ ext: 'json3', url: `${url}&fmt=json3`, name }, { ext: 'vtt', url, name }];
+    const info = {
+        language: 'en-US',
+        subtitles: {
+            nl: vtt('https://yt/sub?lang=nl', 'Dutch'),
+            en: vtt('https://yt/sub?lang=en', 'English'),
+            live_chat: [{ ext: 'json', url: 'https://yt/chat' }]
+        },
+        automatic_captions: {
+            'de-orig': vtt('https://yt/asr?lang=de', 'German (Original)'),
+            de: vtt('https://yt/asr?lang=ar&tlang=de', 'German'),
+            'en-orig': vtt('https://yt/asr?lang=en', 'English (Original)'),
+            fr: vtt('https://yt/asr?lang=en&tlang=fr', 'French')
+        }
+    };
+    assert.deepStrictEqual(pickSubtitles(info), [
+        { url: 'https://yt/sub?lang=en', language: 'en', label: 'English', auto: false, original: true },
+        { url: 'https://yt/sub?lang=nl', language: 'nl', label: 'Dutch', auto: false, original: false },
+        { url: 'https://yt/asr?lang=en', language: 'en', label: 'English (auto-generated)', auto: true, original: true },
+        { url: 'https://yt/asr?lang=de', language: 'de', label: 'German (auto-generated)', auto: true, original: false }
+    ]);
+    assert.deepStrictEqual(pickSubtitles({}), []);
+});
+
 test('yt-dlp\'s reason is read from its last ERROR line', () => {
     assert.strictEqual(ytDlpReason('WARNING: x\nERROR: [youtube] aqz-KE-bpKQ: Private video. Sign in if you\'ve been granted access\n'),
         'Private video. Sign in if you\'ve been granted access');
@@ -93,6 +118,7 @@ test('a video resolves through yt-dlp, run with Node for YouTube\'s challenges',
         streams: pickStreams(info),
         referer: 'https://www.youtube.com/',
         live: false,
+        subtitles: [],
         title: 'Big Buck Bunny',
         thumbnail: 'https://i.ytimg.com/vi/aqz-KE-bpKQ/maxresdefault.jpg'
     });

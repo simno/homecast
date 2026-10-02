@@ -71,7 +71,12 @@ After you press Analyze, the **Subtitles** picker lists what was found with the 
 
 - **On the page:** `<track>` elements next to the `<video>`
 - **In the stream:** subtitle renditions in an HLS master playlist or a DASH manifest
+- **From YouTube:** the uploader's subtitles, and YouTube's automatic captions of the original audio and of each
+  dubbed audio track. YouTube's machine translations aren't offered: it refuses them without a sign-in token
 - **From a URL:** any WebVTT or SRT file, for example for a plain MP4 on a file server
+
+A long list starts with the likely languages (the video's own, your browser's and the last one you picked), with
+**All languages…** to show the rest.
 
 | Device     | Support                                                                                         |
 |------------|-------------------------------------------------------------------------------------------------|

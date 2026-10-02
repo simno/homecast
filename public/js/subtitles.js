@@ -10,6 +10,10 @@ import { updateStatus } from './status.js';
 
 const OFF = 'off';
 const FROM_URL = 'url';
+const ALL = 'all';
+// Longer lists (YouTube's captions in every dub's language) start with the
+// likely ones: the video's own language, the browser's and the last cast with.
+const SHORT_LIST = 8;
 const PREF_KEY = 'homecast_subtitle_language';
 
 let languageNames = null;
@@ -56,6 +60,12 @@ const baseLanguage = (tag) => (tag || '').toLowerCase().split(/[-_]/)[0];
 // ===== COMPOSE PICKER =====
 
 let offered = []; // the selected video's subtitles, indexed by option value
+let shown = { video: null, deviceType: null, all: false }; // what the picker was filled for
+
+function likely(s) {
+    const wanted = [...(navigator.languages || [navigator.language]), preferredLanguage()].filter(Boolean).map(baseLanguage);
+    return s.original || wanted.includes(baseLanguage(s.language));
+}
 
 function addOption(select, value, label) {
     const opt = document.createElement('option');
@@ -65,7 +75,14 @@ function addOption(select, value, label) {
 }
 
 // Fill the picker for a stream about to be cast to a device of `deviceType`.
-export function populateSubtitleOptions(video, deviceType) {
+// `all`: list every language, not just the likely ones (see SHORT_LIST).
+// `keep`: the same video for another device: keep what was picked.
+export function populateSubtitleOptions(video, deviceType, { all = false, keep = false } = {}) {
+    const sameVideo = keep && shown.video === video;
+    const previous = sameVideo ? subtitleSelect.value : null;
+    const previousUrl = subtitleUrlInput.value;
+    if (sameVideo) all = all || shown.all;
+    shown = { video, deviceType, all };
     offered = video?.subtitles || [];
     subtitleSelect.innerHTML = '';
     subtitleUrlInput.classList.add('hidden');
@@ -96,7 +113,11 @@ export function populateSubtitleOptions(video, deviceType) {
     }
 
     subtitleSelect.disabled = false;
-    offered.forEach((s, i) => addOption(subtitleSelect, String(i), trackLabel(s)));
+    const listed = all || offered.length <= SHORT_LIST ? offered : offered.filter(likely);
+    offered.forEach((s, i) => {
+        if (listed.includes(s)) addOption(subtitleSelect, String(i), trackLabel(s));
+    });
+    if (listed.length < offered.length) addOption(subtitleSelect, ALL, `All languages (${offered.length})…`);
     addOption(subtitleSelect, FROM_URL, 'From a URL…');
 
     // Default to the language last cast with: exact tag, then base language.
@@ -107,6 +128,11 @@ export function populateSubtitleOptions(video, deviceType) {
         if (index === -1) index = offered.findIndex(s => baseLanguage(s.language) === baseLanguage(preferred));
     }
     subtitleSelect.value = index === -1 ? OFF : String(index);
+    if (previous && [...subtitleSelect.options].some(o => o.value === previous)) {
+        subtitleSelect.value = previous;
+        subtitleUrlInput.value = previousUrl;
+        subtitleUrlInput.classList.toggle('hidden', previous !== FROM_URL);
+    }
     subtitleSelectRow.classList.remove('hidden');
 }
 
@@ -188,6 +214,12 @@ async function switchSubtitles() {
 
 export function wireSubtitleControls({ onComposeChange }) {
     subtitleSelect.addEventListener('change', () => {
+        if (subtitleSelect.value === ALL) {
+            populateSubtitleOptions(shown.video, shown.deviceType, { all: true });
+            try {
+                subtitleSelect.showPicker(); // straight on to the full list
+            } catch { /* not supported, or not allowed here: it's open next click */ }
+        }
         const fromUrl = subtitleSelect.value === FROM_URL;
         subtitleUrlInput.classList.toggle('hidden', !fromUrl);
         if (fromUrl) subtitleUrlInput.focus();

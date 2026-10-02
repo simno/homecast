@@ -96,7 +96,7 @@ export function checkReady() {
 // it can show.
 export function onDeviceChanged() {
     populateQualityOptions(selectedStream(), { keep: true });
-    populateSubtitleOptions(selectedStream(), selectedDeviceType());
+    populateSubtitleOptions(selectedStream(), selectedDeviceType(), { keep: true });
     renderAudioNote(selectedDeviceType());
     checkReady();
 }

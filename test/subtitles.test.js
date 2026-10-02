@@ -187,3 +187,19 @@ test('with subtitles off, a reload changes nothing', () => {
     assert.deepStrictEqual(subs.reloadOptions(IP, {}), {});
     assert.strictEqual(activeSessions.get(IP).subtitles.wanted, null);
 });
+
+test('YouTube\'s word-by-word captions roll up a line at a time, without tags or blinking', () => {
+    const rolling = [
+        'WEBVTT', 'Kind: captions', 'Language: en', '',
+        '00:00:00.100 --> 00:00:01.396 align:start position:0%', ' ',
+        'Oh, <00:00:00.331><c>now </c><00:00:00.562><c>we\'re </c><00:00:01.024><c>full</c>', '',
+        '00:00:01.396 --> 00:00:01.433 align:start position:0%', 'Oh, now we\'re full', ' ', '',
+        '00:00:01.433 --> 00:00:02.845 align:start position:0%', 'Oh, now we\'re full',
+        'speed <00:00:01.747><c>ahead.  </c><00:00:02.061><c>This</c>', ''
+    ].join('\n');
+    assert.strictEqual(subs.toWebVtt(Buffer.from(rolling)), [
+        'WEBVTT', 'Kind: captions', 'Language: en', '',
+        '00:00:00.100 --> 00:00:01.433', 'Oh, now we\'re full', '',
+        '00:00:01.433 --> 00:00:02.845', 'Oh, now we\'re full', 'speed ahead. This', ''
+    ].join('\n'));
+});
