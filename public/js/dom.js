@@ -64,6 +64,7 @@ export const dashboardSubtitles = $('dashboard-subtitles');
 export const dashboardSubtitleSelect = $('dashboard-subtitle-select');
 export const stopBtn = $('stop-btn');
 export const stopBtnLabel = $('stop-btn-label');
+export const stopBtnIcon = $('stop-btn-icon');
 export const dashboardNotice = $('dashboard-notice');
 export const dashboardNoticeText = $('dashboard-notice-text');
 export const dashboardNoticeClose = $('dashboard-notice-close');
@@ -72,6 +73,7 @@ export const delayValue = $('graph-current-delay');
 
 // Remote control
 export const playback = {
+    card: $('playback-card'),
     seekBack: $('seek-back-btn'),
     playPause: $('play-pause-btn'),
     playIcon: $('play-icon'),

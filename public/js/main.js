@@ -8,7 +8,7 @@ import {
 } from './dom.js';
 import { state, loadState, clearState } from './state.js';
 import { fetchCsrfToken, checkSessionStatus, fetchRunningSessions } from './api.js';
-import { redrawActiveGraphs, startDashboardTimers, renderDashboard } from './dashboard.js';
+import { redrawActiveGraphs, startDashboardTimers, renderDashboard, renderFailure } from './dashboard.js';
 import {
     createStreamEntry, removeStreamEntry, renderStreamBar, setMode, onSetupMode, stopStreamByIp, setStreamHealth, confirmStop
 } from './streams.js';
@@ -100,13 +100,19 @@ castBtn.addEventListener('click', startCasting);
 stopBtn.addEventListener('click', () => {
     const ip = state.activeStreamIp;
     if (!ip) return;
-    confirmStop(stopBtn, stopBtnLabel, 'Confirm stop', async () => {
+    const stream = state.streams.get(ip);
+    const stop = async () => {
         stopBtn.disabled = true;
-        stopBtnLabel.textContent = 'Stopping…';
+        stopBtnLabel.textContent = stream?.health === 'failed' ? 'Closing…' : 'Stopping…';
         await stopStreamByIp(ip);
-        stopBtnLabel.textContent = 'Stop';
+        // Back to Stop or Close for whichever stream is showing now.
+        const showing = state.streams.get(state.activeStreamIp);
+        if (showing) renderFailure(showing);
         stopBtn.disabled = false;
-    });
+    };
+    // A failed stream has nothing playing to interrupt: no confirming.
+    if (stream?.health === 'failed') stop();
+    else confirmStop(stopBtn, stopBtnLabel, 'Confirm stop', stop);
 });
 addStreamBtn.addEventListener('click', () => openComposeOverlay());
 composeOverlay.querySelector('.compose-overlay-backdrop').addEventListener('click', closeComposeOverlay);

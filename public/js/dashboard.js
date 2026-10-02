@@ -2,7 +2,8 @@
 import { drawRateGraph, drawDelayGraph, graphColors } from './graphs.js';
 import {
     dashboardDeviceName, healthDot, healthText, stat,
-    dashboardNotice, dashboardNoticeText, dashboardNoticeClose, statsDetails, transcodePanel
+    dashboardNotice, dashboardNoticeText, dashboardNoticeClose, statsDetails, transcodePanel,
+    stopBtn, stopBtnLabel, stopBtnIcon, playback
 } from './dom.js';
 import { state, HEALTH_LABELS, MAX_HISTORY, STALE_TIMEOUT } from './state.js';
 import { renderDashboardSubtitles } from './subtitles.js';
@@ -63,6 +64,7 @@ export function renderDashboard() {
     updateConnectionHealthUI(stream.health);
     renderNotice(stream.notice);
     renderPlayback(stream);
+    renderFailure(stream);
 
     if (stream.stats && Object.keys(stream.stats).length > 0) {
         renderStats(stream.stats);
@@ -217,6 +219,19 @@ export function updateConnectionHealthUI(healthState) {
     if (healthState === 'stale') healthDot.classList.add('degraded');
 
     healthText.textContent = HEALTH_LABELS[healthState] || 'Connected';
+}
+
+const STOP_ICON = '<rect x="6" y="6" width="12" height="12"/>';
+const CLOSE_ICON = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>';
+
+// A failed stream has nothing playing: no remote control, and its Stop
+// button closes it instead.
+export function renderFailure(stream) {
+    const failed = stream.health === 'failed';
+    playback.card.classList.toggle('hidden', failed);
+    stopBtnLabel.textContent = failed ? 'Close' : 'Stop';
+    stopBtnIcon.innerHTML = failed ? CLOSE_ICON : STOP_ICON;
+    stopBtn.title = failed ? `Close the failed stream on ${stream.deviceName}` : `Stop streaming to ${stream.deviceName}`;
 }
 
 // Redraw the active stream's graphs, e.g. after a color scheme change.

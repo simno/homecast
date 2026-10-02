@@ -93,7 +93,7 @@ function onStreamRecovery(data) {
         setStreamNotice(ip, { type: 'warning', message: `Restart attempt ${data.attempt} failed. Trying again shortly…` });
     } else if (data.status === 'giveup') {
         setStreamHealth(ip, 'failed');
-        setStreamNotice(ip, { type: 'error', message: 'HomeCast could not restart this stream. Stop it and cast again.' });
+        setStreamNotice(ip, { type: 'error', message: 'HomeCast could not restart this stream. Close it and cast again.' });
     }
 }
 

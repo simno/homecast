@@ -1334,7 +1334,8 @@ select:focus {
 
 .health-dot.healthy { background: var(--success); }
 .health-dot.degraded { background: var(--warning); }
-.health-dot.unhealthy { background: var(--danger); }
+.health-dot.unhealthy,
+.health-dot.failed { background: var(--danger); }
 .health-dot.reconnecting { background: var(--warning); animation: blink 0.8s ease-in-out infinite; }
 .health-dot.stale { background: var(--warning); }
 

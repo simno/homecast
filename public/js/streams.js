@@ -4,7 +4,7 @@ import { app, streamBar, addStreamBtn, stopBtn, stopBtnLabel } from './dom.js';
 import { state, saveState, HEALTH_LABELS } from './state.js';
 import { apiPost } from './api.js';
 import { icon, protocolIcon } from './icons.js';
-import { renderDashboard, updateConnectionHealthUI, setStreamNotice } from './dashboard.js';
+import { renderDashboard, renderFailure, updateConnectionHealthUI, setStreamNotice } from './dashboard.js';
 
 export function createStreamEntry(ip, deviceName, deviceType) {
     state.streams.set(ip, {
@@ -119,10 +119,11 @@ export function renderStreamBar() {
         const closeLabel = document.createElement('span');
         closeBtn.insertAdjacentHTML('beforeend', icon('close', 'pill-close-icon'));
         closeBtn.appendChild(closeLabel);
-        closeBtn.title = `Stop streaming to ${stream.deviceName}`;
-        closeBtn.setAttribute('aria-label', closeBtn.title);
+        setCloseTitle(closeBtn, stream);
         closeBtn.addEventListener('click', () => {
-            confirmStop(closeBtn, closeLabel, 'Stop?', () => stopStreamByIp(ip, closeBtn));
+            // A failed stream has nothing playing to interrupt: no confirming.
+            if (state.streams.get(ip)?.health === 'failed') stopStreamByIp(ip, closeBtn);
+            else confirmStop(closeBtn, closeLabel, 'Stop?', () => stopStreamByIp(ip, closeBtn));
         });
 
         pill.append(main, closeBtn);
@@ -130,17 +131,36 @@ export function renderStreamBar() {
     });
 }
 
-// Show a stream's health on its pill and, if it's the one being viewed, the dashboard.
+function setCloseTitle(closeBtn, stream) {
+    closeBtn.title = stream.health === 'failed' ? `Close the failed stream on ${stream.deviceName}` : `Stop streaming to ${stream.deviceName}`;
+    closeBtn.setAttribute('aria-label', closeBtn.title);
+}
+
+// Show a stream's health on its pill and, if it's the one being viewed, the
+// dashboard. A failed one's Stop buttons become Close.
 export function setStreamHealth(ip, health) {
     const stream = state.streams.get(ip);
     if (!stream) return;
+    const failedChanged = (stream.health === 'failed') !== (health === 'failed');
     stream.health = health;
-    const dot = streamBar.querySelector(`.stream-pill[data-ip="${ip}"] .pill-dot`);
+    const pill = streamBar.querySelector(`.stream-pill[data-ip="${ip}"]`);
+    const dot = pill?.querySelector('.pill-dot');
     if (dot) {
         dot.className = pillDotClass(health);
         dot.title = HEALTH_LABELS[health] || health;
     }
-    if (ip === state.activeStreamIp) updateConnectionHealthUI(health);
+    const closeBtn = pill?.querySelector('.pill-close');
+    if (closeBtn && failedChanged) {
+        disarm(closeBtn, closeBtn.querySelector('span'));
+        setCloseTitle(closeBtn, stream);
+    }
+    if (ip !== state.activeStreamIp) return;
+    updateConnectionHealthUI(health);
+    if (failedChanged) {
+        // A Stop armed before the failure would put its old label back.
+        disarm(stopBtn, stopBtnLabel);
+        renderFailure(stream);
+    }
 }
 
 // ===== STOPPING =====
