@@ -5,7 +5,9 @@
 const http = require('http');
 const WebSocket = require('ws');
 
-function createFakeLgTv({ knownKey = null, prompt = 'accept', foregroundApp = 'com.webos.app.livetv', volume = 12 } = {}) {
+// `soundOutput`: 'external_arc' plays through a soundbar, which (like a real
+// one) ignores setVolume and only follows volume key presses.
+function createFakeLgTv({ knownKey = null, prompt = 'accept', foregroundApp = 'com.webos.app.livetv', volume = 12, soundOutput = 'tv_speaker' } = {}) {
     const state = {
         knownKey,
         prompts: 0,
@@ -19,7 +21,8 @@ function createFakeLgTv({ knownKey = null, prompt = 'accept', foregroundApp = 'c
     };
     const subscribers = new Set();
 
-    const volumePayload = () => ({ volumeStatus: { volume: state.volume, muteStatus: state.muted } });
+    const volumePayload = () => ({ volumeStatus: { volume: state.volume, muteStatus: state.muted, soundOutput } });
+    const soundbar = soundOutput === 'external_arc';
 
     // The browser opening HomeCast's player page: it connects and says hello.
     function openPlayer(target) {
@@ -51,7 +54,15 @@ function createFakeLgTv({ knownKey = null, prompt = 'accept', foregroundApp = 'c
         },
         'ssap://audio/getVolume': volumePayload,
         'ssap://audio/setVolume': (payload) => {
-            state.volume = payload.volume;
+            if (!soundbar) state.volume = payload.volume;
+            return {};
+        },
+        'ssap://audio/volumeUp': () => {
+            state.volume = Math.min(100, state.volume + 1);
+            return {};
+        },
+        'ssap://audio/volumeDown': () => {
+            state.volume = Math.max(0, state.volume - 1);
             return {};
         },
         'ssap://audio/setMute': (payload) => {

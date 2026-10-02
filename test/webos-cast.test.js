@@ -201,6 +201,16 @@ test('volume and mute are set on the TV itself', async () => {
     assert.strictEqual(tv.state.muted, true);
 });
 
+test('a soundbar on HDMI ARC is turned up and down with volume key presses', async () => {
+    await lgTv({ knownKey: 'key-1', soundOutput: 'external_arc', volume: 20 });
+    await cast();
+    assert.deepStrictEqual((await control('volume', 0.23)).body, { volume: { level: 0.23, muted: false } });
+    assert.strictEqual(tv.state.requests.filter(uri => uri === 'ssap://audio/volumeUp').length, 3);
+    await control('volume', 0.21);
+    assert.strictEqual(tv.state.volume, 21);
+    assert.ok(!tv.state.requests.includes('ssap://audio/setVolume'));
+});
+
 test('a volume change on the TV reaches the dashboard', async () => {
     await lgTv({ knownKey: 'key-1' });
     await cast();
