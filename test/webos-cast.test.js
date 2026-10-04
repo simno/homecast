@@ -239,6 +239,29 @@ test('a page that is not full screen is clicked with the pointer', async () => {
     assert.deepStrictEqual(tv.state.pointer, ['type:move', 'type:move', 'type:click', 'type:button']);
 });
 
+test('leaving full screen (Back on the remote) stops the cast instead of clicking back in', async () => {
+    await lgTv({ knownKey: 'key-1' });
+    await cast();
+    const player = tv.lastPlayer();
+    player.report({ playerState: 'PLAYING', currentTime: 1, fullscreen: true });
+    player.report({ playerState: 'PLAYING', currentTime: 2, fullscreen: false });
+    await waitFor(() => !activeWebOsSessions.has(IP));
+    assert.deepStrictEqual(tv.state.launched.at(-1), { id: 'com.webos.app.livetv' });
+    assert.deepStrictEqual(tv.state.pointer, []);
+});
+
+test('a reloaded page that is not yet full screen is clicked, not stopped', async () => {
+    await lgTv({ knownKey: 'key-1' });
+    await cast();
+    const player = tv.lastPlayer();
+    player.report({ playerState: 'PLAYING', currentTime: 1, fullscreen: true });
+    // The page reloads: it says hello again, and starts out of full screen.
+    player.ws.send(JSON.stringify({ type: 'webosPlayer', session: player.session, event: 'hello' }));
+    player.report({ playerState: 'PLAYING', currentTime: 2, fullscreen: false });
+    await waitFor(() => tv.state.pointer.includes('type:button'));
+    assert.ok(activeWebOsSessions.has(IP));
+});
+
 test('a playback error on the TV is shown on the dashboard', async () => {
     await lgTv({ knownKey: 'key-1' });
     await cast();
