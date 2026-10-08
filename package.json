@@ -58,10 +58,10 @@
     "cookie-parser": "^1.4.7",
     "csrf-csrf": "^4.0.3",
     "express": "5.2.1",
-    "express-rate-limit": "^8.7.0",
+    "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "multicast-dns": "^7.2.5",
-    "playwright": "^1.63.0",
+    "playwright": "^1.64.0",
     "ws": "^8.22.0"
   },
   "devDependencies": {
