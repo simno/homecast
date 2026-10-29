@@ -36,7 +36,10 @@ jobs:
       - name: Install yt-dlp
         run: pip install --user "yt-dlp[default]"
 
+      # shell: bash adds pipefail, so a failing check fails the step
+      # rather than tee's exit status hiding it.
       - name: Run site checks
+        shell: bash
         run: npm run test:sites 2>&1 | tee sites.log
 
       - name: Report failure
@@ -46,7 +49,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           title="Site check failing"
-          body=$(printf 'The weekly site check failed: %s\n\n```\n%s\n```\n' "$RUN_URL" "$(grep -E '✖|AssertionError|Error:' sites.log | head -30)")
+          if [ -f sites.log ]; then
+            details=$(grep -E '✖|AssertionError|Error:' sites.log | head -30)
+          else
+            details='The site checks did not run: a setup step failed (see the run log).'
+          fi
+          body=$(printf 'The weekly site check failed: %s\n\n```\n%s\n```\n' "$RUN_URL" "$details")
           existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"

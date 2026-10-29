@@ -90,7 +90,8 @@ test('Kick: a channel resolves, and a live one\'s playlist loads', async () => {
 test('Dailymotion: a video resolves to a manifest that loads', async () => {
     const result = await resolveDailymotion(DAILYMOTION_VIDEO);
     assert.strictEqual(result.status, 'ok', result.message);
-    assert.match(await fetchPlaylist(result.url, result.referer), /#EXT-X-STREAM-INF/);
+    // The variant yt-dlp picked, not the master: it lists segments.
+    assert.match(await fetchPlaylist(result.url, result.referer), /#EXTINF/);
 });
 
 test('Rumble: a video page leads to an embed page with a playable stream', async () => {

@@ -10,7 +10,7 @@ const { resolveTwitchStream } = require('../lib/twitch');
 const { resolveXBroadcast, postIdFromUrl, broadcastsInPost, syndicationToken } = require('../lib/x-broadcast');
 const { fetchLaunchWebcasts } = require('../lib/spacex');
 const { parseKickUrl, resolveKick } = require('../lib/kick');
-const { videoIdFromUrl, resolveDailymotion } = require('../lib/dailymotion');
+const { videoIdFromUrl } = require('../lib/dailymotion');
 const { isRumbleVideoUrl, resolveRumble } = require('../lib/rumble');
 const { isNasaLiveUrl, resolveNasaLive, decodeEntities } = require('../lib/nasa');
 
@@ -302,8 +302,6 @@ test('Kick: unknown channels are offline, other failures errors', async (t) => {
 
 // ===== Dailymotion =====
 
-const DM_VIDEO = 'GET https://geo.dailymotion.com/videos/x8j6bwk';
-
 test('Dailymotion: the video ID is read from every URL form', () => {
     for (const url of [
         'https://www.dailymotion.com/video/x8j6bwk',
@@ -314,59 +312,6 @@ test('Dailymotion: the video ID is read from every URL form', () => {
     ]) assert.strictEqual(videoIdFromUrl(url), 'x8j6bwk', url);
     assert.strictEqual(videoIdFromUrl('https://www.dailymotion.com/tv'), null);
     assert.strictEqual(videoIdFromUrl('https://example.com/video/x8j6bwk'), null);
-});
-
-test('Dailymotion: a video resolves to its manifest, with its title and largest poster', async (t) => {
-    fakeApi(t, {
-        [`${DM_VIDEO}/details`]: { data: { info: { title: 'Popeye' } } },
-        [DM_VIDEO]: {
-            data: {
-                stream: { stream_type: 'recorded', url: 'https://www.dailymotion.com/cdn/manifest/video/x8j6bwk.m3u8?sec=s' },
-                media: { posters_url: { 60: 'https://s.example/x60', 1080: 'https://s.example/x1080', 480: 'https://s.example/x480' } }
-            }
-        }
-    });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x8j6bwk'), {
-        status: 'ok', type: 'hls', referer: 'https://www.dailymotion.com/', live: false,
-        url: 'https://www.dailymotion.com/cdn/manifest/video/x8j6bwk.m3u8?sec=s',
-        title: 'Popeye', thumbnail: 'https://s.example/x1080'
-    });
-});
-
-test('Dailymotion: a live stream is live, and a missing title costs nothing', async (t) => {
-    fakeApi(t, {
-        [`${DM_VIDEO}/details`]: new Error('ETIMEDOUT'),
-        [DM_VIDEO]: { data: { stream: { stream_type: 'live', url: 'https://www.dailymotion.com/cdn/live/video/x8j6bwk.m3u8' } } }
-    });
-    const result = await resolveDailymotion('https://www.dailymotion.com/video/x8j6bwk');
-    assert.deepStrictEqual([result.status, result.live, result.title, result.thumbnail], ['ok', true, null, null]);
-});
-
-test('Dailymotion: refusals are explained', async (t) => {
-    fakeApi(t, {
-        [`${DM_VIDEO}/details`]: { status: 404, data: {} },
-        [DM_VIDEO]: { status: 404, data: { error: { code: '404', reason: 'content_not_found' } } },
-        'GET https://geo.dailymotion.com/videos/x9zenyk': { data: { error: { code: 'DM016', reason: 'embed_rules' } } },
-        'GET https://geo.dailymotion.com/videos/x1new': { data: { error: { reason: 'something_new' } } }
-    });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x8j6bwk'),
-        { status: 'offline', message: 'This Dailymotion video doesn\'t exist or has been removed' });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x9zenyk'),
-        { status: 'offline', message: 'This Dailymotion video can only be played on dailymotion.com' });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x1new'),
-        { status: 'offline', message: 'Dailymotion won\'t play this video (something_new)' });
-});
-
-test('Dailymotion: no stream, or no reaching Dailymotion, is an error', async (t) => {
-    fakeApi(t, {
-        [`${DM_VIDEO}/details`]: { data: {} },
-        [DM_VIDEO]: { status: 500, data: 'oops' },
-        'GET https://geo.dailymotion.com/videos/x2down': new Error('ENOTFOUND')
-    });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x8j6bwk'),
-        { status: 'error', message: 'Dailymotion returned an unexpected response (500)' });
-    assert.deepStrictEqual(await resolveDailymotion('https://dai.ly/x2down'),
-        { status: 'error', message: 'Could not reach Dailymotion' });
 });
 
 // ===== Rumble =====

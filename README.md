@@ -98,11 +98,11 @@ npm start
 docker build -t homecast .                              # full
 docker build --build-arg VARIANT=lite -t homecast .     # without the headless browser
 docker build --build-arg TRANSCODE=none -t homecast .   # without FFmpeg
-docker build --build-arg YTDLP=none -t homecast .       # without yt-dlp (no YouTube)
+docker build --build-arg YTDLP=none -t homecast .       # without yt-dlp (no YouTube or Dailymotion)
 ```
 
-The image takes the latest [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it's built. YouTube changes often enough to
-break older yt-dlp releases, so if YouTube links stop working, pull a newer image or rebuild yours.
+The image takes the latest [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it's built. YouTube and Dailymotion change often enough to
+break older yt-dlp releases, so if their links stop working, pull a newer image or rebuild yours.
 `--build-arg YTDLP=2026.08.19` pins a release.
 
 </details>
@@ -116,7 +116,7 @@ break older yt-dlp releases, so if YouTube links stop working, pull a newer imag
 
 The two images handle direct links, HLS/DASH, Twitch and ordinary embedded players the same way. `lite` can't find
 streams on pages that only reveal them after running JavaScript. When that may be the reason nothing was found,
-Analyze says so. Both include yt-dlp for YouTube (about 40 MB of each). amd64 images include FFmpeg for
+Analyze says so. Both include yt-dlp for YouTube and Dailymotion (about 40 MB of each). amd64 images include FFmpeg for
 [4K conversion](docs/4k-conversion.md). arm64 images don't.
 
 ## Devices
@@ -134,8 +134,8 @@ For pairing, the LG permission prompt and per-device limits, see [docs/devices.m
 - Direct video files (MP4, WebM) and HLS or DASH streams
 - Web pages whose player uses one of those, including players in iframes and players that only load in a browser
 - Sites with their own handling in the code: **Twitch** (live and VODs), **Kick** (live, past broadcasts and
-  clips), **Dailymotion**, **Rumble**, **X / Periscope** broadcasts, **SpaceX** launch pages and the **NASA+**
-  live channel
+  clips), **Rumble**, **X / Periscope** broadcasts, **SpaceX** launch pages and the **NASA+** live channel
+- **Dailymotion** videos and live streams, through [yt-dlp](https://github.com/yt-dlp/yt-dlp), as for YouTube
 - **YouTube** videos and live streams, through [yt-dlp](https://github.com/yt-dlp/yt-dlp) (in the Docker images;
   when running from source, install a recent yt-dlp and keep it updated). Sponsors, self-promotion and subscribe
   reminders are skipped using [SponsorBlock](https://sponsor.ajay.app) (other categories can be picked under

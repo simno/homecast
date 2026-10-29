@@ -35,7 +35,7 @@ RUN if [ "$TRANSCODE" != "none" ] && [ "$TARGETARCH" = "amd64" ]; then \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
-# yt-dlp, for YouTube (lib/youtube.js): its standalone build, which brings
+# yt-dlp, for YouTube and Dailymotion (lib/youtube.js, lib/dailymotion.js): its standalone build, which brings
 # its own Python, checked against the release's SHA-256 list. It answers
 # YouTube's challenges by running them in Node, already here. YouTube breaks
 # older yt-dlp releases every few weeks, so the default takes the latest;
