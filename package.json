@@ -67,7 +67,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "dashjs": "^5.2.1",
     "eslint": "^10.13.0",
     "typescript": "^7.0.2"
