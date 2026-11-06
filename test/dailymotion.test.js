@@ -22,13 +22,18 @@ const info = {
 };
 
 let dir;
-// Points YTDLP_PATH at a script that prints `stdout` and `stderr` and exits with `code`.
-function fakeYtDlp(t, { stdout = '', stderr = '', code = 0 }) {
+const REFUSED = 'ERROR: [dailymotion] x8j6bwk: No video formats found!; please report this issue';
+// Points YTDLP_PATH at a script that prints `stdout` and `stderr` and exits with
+// `code`, after failing its first `refusals` calls the way a refused master does.
+function fakeYtDlp(t, { stdout = '', stderr = '', code = 0, refusals = 0 }) {
     const script = path.join(dir, `yt-dlp-${Math.random().toString(36).slice(2)}`);
     fs.writeFileSync(path.join(dir, 'out.txt'), stdout);
+    fs.rmSync(path.join(dir, 'calls.txt'), { force: true });
     fs.writeFileSync(script, [
         '#!/bin/sh',
         'printf "%s\\n" "$@" > "$(dirname "$0")/args.txt"',
+        'echo call >> "$(dirname "$0")/calls.txt"',
+        `if [ "$(wc -l < "$(dirname "$0")/calls.txt")" -le ${refusals} ]; then echo '${REFUSED}' >&2; exit 1; fi`,
         'cat "$(dirname "$0")/out.txt"',
         `printf '%s' '${stderr.replace(/'/g, '\'\\\'\'')}' >&2`,
         `exit ${code}`
@@ -41,6 +46,7 @@ function fakeYtDlp(t, { stdout = '', stderr = '', code = 0 }) {
     });
 }
 const lastArgs = () => fs.readFileSync(path.join(dir, 'args.txt'), 'utf8').trim().split('\n');
+const callCount = () => fs.readFileSync(path.join(dir, 'calls.txt'), 'utf8').trim().split('\n').length;
 
 before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'homecast-dailymotion-')); });
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -83,6 +89,27 @@ test('any other yt-dlp failure is an error suggesting an update', async (t) => {
         status: 'error',
         message: 'yt-dlp couldn\'t read this Dailymotion video: Unable to download JSON metadata: HTTP Error 500. Updating yt-dlp often fixes this'
     });
+});
+
+test('a refused master is asked for once more, and the second answer played', async (t) => {
+    fakeYtDlp(t, { stdout: JSON.stringify(info), refusals: 1 });
+    const result = await resolveDailymotion('https://dai.ly/x8j6bwk');
+    assert.deepStrictEqual([result.status, result.url], ['ok', 'https://vod.example/720_2200.m3u8']);
+    assert.strictEqual(callCount(), 2);
+});
+
+test('a master refused twice is an error, with no third try', async (t) => {
+    fakeYtDlp(t, { refusals: 3 });
+    const result = await resolveDailymotion('https://dai.ly/x8j6bwk');
+    assert.strictEqual(result.status, 'error');
+    assert.match(result.message, /No video formats found/);
+    assert.strictEqual(callCount(), 2);
+});
+
+test('other failures are not retried', async (t) => {
+    fakeYtDlp(t, { code: 1, stderr: 'ERROR: [dailymotion] x8j6bwk: Not found.' });
+    assert.strictEqual((await resolveDailymotion('https://dai.ly/x8j6bwk')).status, 'offline');
+    assert.strictEqual(callCount(), 1);
 });
 
 test('no yt-dlp installed says so', async (t) => {
