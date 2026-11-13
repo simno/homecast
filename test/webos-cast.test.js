@@ -246,6 +246,8 @@ test('leaving full screen (Back on the remote) stops the cast instead of clickin
     player.report({ playerState: 'PLAYING', currentTime: 1, fullscreen: true });
     player.report({ playerState: 'PLAYING', currentTime: 2, fullscreen: false });
     await waitFor(() => !activeWebOsSessions.has(IP));
+    // The session ends first; going back to the TV's app follows over SSAP.
+    await waitFor(() => tv.state.launched.at(-1)?.id === 'com.webos.app.livetv');
     assert.deepStrictEqual(tv.state.launched.at(-1), { id: 'com.webos.app.livetv' });
     assert.deepStrictEqual(tv.state.pointer, []);
 });
